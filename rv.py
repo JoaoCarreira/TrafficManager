@@ -8,6 +8,7 @@ import threading
 import time
 from datetime import datetime
 import cam_rsu
+import json
 
 MCAST_GRP = "224.0.0.1"
 MCAST_PORT = 10000
@@ -15,8 +16,6 @@ MCAST_PORT = 10000
 NodeID = "0"
 
 messageID = 0
-
-test = False
 
 table_of_nodes=[]
 
@@ -26,16 +25,12 @@ def main():
 
 	global lock
 
-	if "-s" in sys.argv[1:]:
-		
-		threadreceiver = ThreadReceiver("Thread-receiver")
-		threadreceiver.start()
-		sender()
+	threadreceiver = ThreadReceiver("Thread-receiver")
+	threadreceiver.start()
+	sender()
 
 
 def sender():
-
-	global test
 
 	#generate_nodeID()
 
@@ -52,8 +47,8 @@ def sender():
 		if number_of_nodes==0:
 
 			if time_increment==False:
-				timeToSendMessage = time.time() + 
-				2
+				timeToSendMessage = time.time() + 2
+				time_increment = True
 
 			while time.time() > timeToSendMessage:
 
@@ -61,14 +56,15 @@ def sender():
 
 				generate_messageID()
 
-				messageToSend = "Beacon" + "," + NodeID + "," + gpsInfo + "," + str(datetime.now())
-				data = messageToSend.encode()
-				print("Beacon")
+				messageToSend = {'Type': 'Beacon', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.now())}
+				
+				data = json.dumps(messageToSend)
+
 				sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 				sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
-				sock.sendto(data, (MCAST_GRP, MCAST_PORT))
+				sock.sendto(data.encode(), (MCAST_GRP, MCAST_PORT))
 				timeToSendMessage = time.time() + 10
-				time_increment=True
+				#time_increment=True
 
 		else:
 
@@ -88,8 +84,6 @@ def sender():
 
 def receiver():
 
-	global test
-
 	thread1 = myThread("Thread-1")
 	thread1.start()
 
@@ -104,8 +98,7 @@ def receiver():
 		exist=False
 		data=sock.recv(1024)
 		messageReceived=data.decode()
-		if test == True:
-			print("Received the following message: \n" + messageReceived)
+		print("Received the following message: \n" + str(json.loads(messageReceived)))
 		node_info=messageReceived.split(',')
 
 		node_info.append(0)
@@ -139,8 +132,6 @@ def generate_messageID():
 	global messageID
 	messageID += 1
 
-
-
 class myThread (threading.Thread):
    def __init__(self, threadID):
       threading.Thread.__init__(self)
@@ -160,7 +151,6 @@ class ThreadReceiver (threading.Thread):
 
 def threadClock():
 	global table_of_nodes
-	global test
 
 	while True:
 		counter = 0
