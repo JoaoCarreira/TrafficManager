@@ -9,11 +9,15 @@ import time
 from datetime import datetime
 import cam_rsu
 import json
+import uuid
 
 MCAST_GRP = "224.0.0.1"
 MCAST_PORT = 10000
 
-NodeID = "0"
+#mac_addr = hex(uuid.getnode()).replace('0x', '')
+#NodeID = ':'.join(mac_addr[i : i + 2] for i in range(0, 11, 2))
+
+NodeID = 0
 
 messageID = 0
 
@@ -24,6 +28,10 @@ lock= threading.Lock()
 def main():
 
 	global lock
+	global NodeID
+
+	NodeID = sys.argv[1]
+	print("Your node is: " + str(NodeID))
 
 	threadreceiver = ThreadReceiver("Thread-receiver")
 	threadreceiver.start()
@@ -31,8 +39,6 @@ def main():
 
 
 def sender():
-
-	#generate_nodeID()
 
 	time_increment=False
 
@@ -58,6 +64,8 @@ def sender():
 
 				messageToSend = {'Type': 'Beacon', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.now())}
 				
+				print("Message to send: " + str(messageToSend))
+
 				data = json.dumps(messageToSend)
 
 				sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
@@ -84,8 +92,10 @@ def sender():
 
 def receiver():
 
-	thread1 = myThread("Thread-1")
-	thread1.start()
+	global table_of_nodes
+
+	#thread1 = myThread("Thread-1")
+	#thread1.start()
 
 	sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 	sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -99,32 +109,37 @@ def receiver():
 		data=sock.recv(1024)
 		messageReceived=data.decode()
 		print("Received the following message: \n" + str(json.loads(messageReceived)))
-		node_info=messageReceived.split(',')
+		node_info=json.loads(messageReceived)
 
-		node_info.append(0)
+		if node_info['Type']=='Beacon':
 
-		print(table_of_nodes)
+			if node_info['ID'] == NodeID:
+				continue
 
-		if node_info[0]=='Beacon':
-			node_info.pop(0)
-
-			counter = 0
+			counter = -1
 
 			lock.acquire()
 			try:
-				for i in table_of_nodes:
-  					if node_info[0]==i[0]:
-  						table_of_nodes[counter]=node_info
-  						exist=True
-  						counter += 1
+				if len(table_of_nodes) > 0:
 
-				if exist!=True and node_info[0]!=NodeID:
+					for i in table_of_nodes:
+						counter += 1
+						if node_info['ID']==i['ID']:
+							print("Encontrei um com ID igual")
+							if convertStringIntoDatetime(node_info['Timestamp']) > convertStringIntoDatetime(i['Timestamp']):
+								table_of_nodes[counter]=node_info
+								break
+						table_of_nodes.append(node_info)
+						
+				else:
 					table_of_nodes.append(node_info)
+
+				print("Tabela:" + str(table_of_nodes))
 
 			finally:
 				lock.release()
 
-		if node_info[0]=='CAM':
+		if node_info['Type']=='CAM':
 			cam_rsu.process_CAM()
 
 def generate_messageID():
@@ -147,6 +162,8 @@ class ThreadReceiver (threading.Thread):
    def run(self):
       receiver()
 
+def convertStringIntoDatetime(string):
+	return datetime.strptime(string, "%Y-%m-%d %H:%M:%S.%f")
 
 
 def threadClock():
@@ -155,17 +172,17 @@ def threadClock():
 	while True:
 		counter = 0
 
-		for i in table_of_nodes:
-  			if i[4]==15:
+		#for i in table_of_nodes:
+
+  			#if i[4]==15:
   			
-  				print("TIMEOUT \nDeleting the table entry of the NodeID=" + table_of_nodes[counter][0]+ " ...")
-  				del(table_of_nodes[counter])
-  				continue
+  				#print("TIMEOUT \nDeleting the table entry of the NodeID=" + table_of_nodes[counter][0]+ " ...")
+  				#del(table_of_nodes[counter])
+  				#continue
 
-  			table_of_nodes[counter][4] += 1 
-  			time.sleep(1)
-  			counter += 1
-
+#  			table_of_nodes[counter][4] += 1 
+ # 			time.sleep(1)
+  #			counter += 1
 
 if __name__ == '__main__':
     main() 
