@@ -5,9 +5,8 @@ import time
 import uuid
 #from hashlib import blake2s
 import threading
-import time
 from datetime import datetime
-import cam_rsu
+import cam_obu
 import json
 import uuid
 
@@ -42,6 +41,8 @@ def sender():
 
 	time_increment=False
 
+	gpsInfo= "(2,2)"
+
 	while True:
 
 		lock.acquire()
@@ -57,8 +58,6 @@ def sender():
 				time_increment = True
 
 			while time.time() > timeToSendMessage:
-
-				gpsInfo= "(2,2)"
 
 				generate_messageID()
 
@@ -78,17 +77,17 @@ def sender():
 
 			if time_increment==True:
 				timeToSendMessage = time.time() + 2
-
-			while time.time() > timeToSendMessage:
-				messageToSend = "CAM" + "," + NodeID + "," + gpsInfo + "," + str(datetime.now())
-				data = messageToSend.encode()
-				print("CAM")
-				sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-				sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
-				sock.sendto(data, (MCAST_GRP, MCAST_PORT))
-				timeToSendMessage = time.time() + 10
 				time_increment=False
 
+			while time.time() > timeToSendMessage:
+				messageToSend = {'Type': 'CAM', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.now())}
+				data = json.dumps(messageToSend)
+				print("Message to send: " + str(messageToSend))
+				sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+				sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
+				sock.sendto(data.encode(), (MCAST_GRP, MCAST_PORT))
+				timeToSendMessage = time.time() + 10
+				
 
 def receiver():
 
@@ -108,44 +107,48 @@ def receiver():
 		exist=False
 		data=sock.recv(1024)
 		messageReceived=data.decode()
-		print("Received the following message: \n" + str(json.loads(messageReceived)))
 		node_info=json.loads(messageReceived)
 
-		if node_info['Type']=='Beacon':
+		if node_info['ID'] == NodeID:
+			continue
 
-			if node_info['ID'] == NodeID:
-				continue
+		else:
+			print("Received the following message: \n" + str(json.loads(messageReceived)))
+			if node_info['Type']=='Beacon':
+				add_table(node_info)
 
-			counter = -1
-
-			lock.acquire()
-			try:
-				if len(table_of_nodes) > 0:
-
-					for i in table_of_nodes:
-						counter += 1
-						if node_info['ID']==i['ID']:
-							print("Encontrei um com ID igual")
-							if convertStringIntoDatetime(node_info['Timestamp']) > convertStringIntoDatetime(i['Timestamp']):
-								table_of_nodes[counter]=node_info
-								break
-						table_of_nodes.append(node_info)
-						
-				else:
-					table_of_nodes.append(node_info)
-
-				print("Tabela:" + str(table_of_nodes))
-
-			finally:
-				lock.release()
-
-		if node_info['Type']=='CAM':
-			cam_rsu.process_CAM()
+			if node_info['Type']=='CAM':
+				add_table(node_info)
+				cam_obu.process_CAM(node_info)
 
 def generate_messageID():
 	
 	global messageID
 	messageID += 1
+
+def add_table(node_info):
+	counter = -1
+
+	lock.acquire()
+	try:
+		if len(table_of_nodes) > 0:
+
+			for i in table_of_nodes:
+				counter += 1
+				if node_info['ID']==i['ID']:
+					print("Encontrei um com ID igual")
+					if convertStringIntoDatetime(node_info['Timestamp']) > convertStringIntoDatetime(i['Timestamp']):
+						table_of_nodes[counter]=node_info
+						break
+				table_of_nodes.append(node_info)
+				
+		else:
+			table_of_nodes.append(node_info)
+
+		print("Tabela:" + str(table_of_nodes))
+
+	finally:
+		lock.release()
 
 class myThread (threading.Thread):
    def __init__(self, threadID):
