@@ -24,6 +24,8 @@ table_of_nodes=[]
 
 lock= threading.Lock()
 
+gpsInfo= "(2,2)"
+
 def main():
 
 	global lock
@@ -39,9 +41,9 @@ def main():
 
 def sender():
 
-	time_increment=False
+	buffer_messages=[None]
 
-	gpsInfo= "(2,2)"
+	time_increment=False
 
 	while True:
 
@@ -51,7 +53,13 @@ def sender():
 		finally:
 			lock.release()
 
+		generate_messageID()
+
 		if number_of_nodes==0:
+
+			messageToSend = cam_obu.generate_message(NodeID,messageID)
+			buffer_messages[0]=messageToSend
+			print(str(buffer_messages))
 
 			if time_increment==False:
 				timeToSendMessage = time.time() + 2
@@ -61,7 +69,7 @@ def sender():
 
 				generate_messageID()
 
-				messageToSend = {'Type': 'Beacon', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.now())}
+				messageToSend = {'Type': 'Beacon', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.now()),'Message_ID': messageID}
 				
 				print("Message to send: " + str(messageToSend))
 
@@ -71,24 +79,27 @@ def sender():
 				sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
 				sock.sendto(data.encode(), (MCAST_GRP, MCAST_PORT))
 				timeToSendMessage = time.time() + 10
-				#time_increment=True
 
 		else:
 
-			if time_increment==True:
+			if len(buffer_messages)>0:
+				messageToSend=buffer_messages[0]
+				timeToSendMessage = time.time()
+
+			else:
+				messageToSend = cam_obu.generate_message(NodeID)
 				timeToSendMessage = time.time() + 2
 				time_increment=False
 
 			while time.time() > timeToSendMessage:
-				messageToSend = {'Type': 'CAM', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.now())}
 				data = json.dumps(messageToSend)
 				print("Message to send: " + str(messageToSend))
 				sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 				sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
 				sock.sendto(data.encode(), (MCAST_GRP, MCAST_PORT))
-				timeToSendMessage = time.time() + 10
-				
+				timeToSendMessage = time.time() + 10	
 
+		time.sleep(5)
 def receiver():
 
 	global table_of_nodes
@@ -124,7 +135,11 @@ def receiver():
 def generate_messageID():
 	
 	global messageID
-	messageID += 1
+	lock.acquire()
+	try:
+		messageID += 1
+	finally:
+		lock.release()
 
 def add_table(node_info):
 	counter = -1
