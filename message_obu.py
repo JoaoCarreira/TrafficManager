@@ -9,10 +9,37 @@ from datetime import datetime
 import cam_obu
 import json
 import uuid
+RASPBERRY = False
+import sys, json
+if RASPBERRY == True:
+    import RPi.GPIO as GPIO
+from time import sleep
+import time
+import threading
+
 
 MCAST_GRP = "224.0.0.1"
 MCAST_PORT = 10000
 
+
+##################################################
+
+
+FREQUENCY = 100
+MIN_SPEED = 0
+MAX_SPEED = 100
+MAX_FORWARD_SPEED = 60
+MAX_BACKWARD_SPEED =60
+SLEEP_TIME = 2
+Timer=0
+X=int(0)
+Y=int(0)
+Co=[X,Y]
+DIR="direçao"
+EstaAndar=False
+lock1 = threading.Lock()
+
+######################################
 #mac_addr = hex(uuid.getnode()).replace('0x', '')
 #NodeID = ':'.join(mac_addr[i : i + 2] for i in range(0, 11, 2))
 
@@ -24,52 +51,41 @@ table_of_nodes=[]
 
 lock= threading.Lock()
 
-gpsInfo= "(2,2)"
-
 def main():
 
 	global lock
 	global NodeID
-
 	NodeID = sys.argv[1]
 	print("Your node is: " + str(NodeID))
 
 	threadreceiver = ThreadReceiver("Thread-receiver")
 	threadreceiver.start()
-	sender()
+	threadAndar = ThreadAndar("Thread-andar")
+	threadAndar.start()
+	threadsender = ThreadSender("Thread-sender")
+	threadsender.start()
 
 
 def sender():
 
-	buffer_messages=[None]
-
 	time_increment=False
+
+	timeToSendMessage = time.time()
 
 	while True:
 
-		lock.acquire()
-		try:
-			number_of_nodes=len(table_of_nodes)
-		finally:
-			lock.release()
-
-		generate_messageID()
+		number_of_nodes=len(table_of_nodes)
 
 		if number_of_nodes==0:
 
-			messageToSend = cam_obu.generate_message(NodeID,messageID)
-			buffer_messages[0]=messageToSend
-			print(str(buffer_messages))
-
-			if time_increment==False:
-				timeToSendMessage = time.time() + 2
-				time_increment = True
-
 			while time.time() > timeToSendMessage:
-
+				
+				
+				gpsInfo=getCoordenadas()
+				
 				generate_messageID()
 
-				messageToSend = {'Type': 'Beacon', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.now()),'Message_ID': messageID}
+				messageToSend = {'Type': 'Beacon', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.now())}
 				
 				print("Message to send: " + str(messageToSend))
 
@@ -78,32 +94,23 @@ def sender():
 				sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 				sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
 				sock.sendto(data.encode(), (MCAST_GRP, MCAST_PORT))
-				timeToSendMessage = time.time() + 10
+				timeToSendMessage = time.time() + 0.5
+				#time_increment=True
 
 		else:
 
-			if len(buffer_messages)>0:
-				messageToSend=buffer_messages[0]
-				timeToSendMessage = time.time()
-
-			else:
-				messageToSend = cam_obu.generate_message(NodeID)
-				timeToSendMessage = time.time() + 2
-				time_increment=False
-
 			while time.time() > timeToSendMessage:
+				gpsInfo=getCoordenadas()
+				messageToSend = {'Type': 'CAM', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.now())}
 				data = json.dumps(messageToSend)
 				print("Message to send: " + str(messageToSend))
 				sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 				sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
 				sock.sendto(data.encode(), (MCAST_GRP, MCAST_PORT))
-				timeToSendMessage = time.time() + 10	
+				timeToSendMessage = time.time() + 0.5
+				
 
-		time.sleep(5)
 def receiver():
-
-	global table_of_nodes
-
 	#thread1 = myThread("Thread-1")
 	#thread1.start()
 
@@ -135,14 +142,14 @@ def receiver():
 def generate_messageID():
 	
 	global messageID
-	lock.acquire()
-	try:
-		messageID += 1
-	finally:
-		lock.release()
+	messageID += 1
 
 def add_table(node_info):
-	counter = -1
+
+	global table_of_nodes
+
+	counter=-1
+	flag_exist=False
 
 	lock.acquire()
 	try:
@@ -151,10 +158,13 @@ def add_table(node_info):
 			for i in table_of_nodes:
 				counter += 1
 				if node_info['ID']==i['ID']:
-					print("Encontrei um com ID igual")
 					if convertStringIntoDatetime(node_info['Timestamp']) > convertStringIntoDatetime(i['Timestamp']):
+						print("Encontrei um com ID igual")
 						table_of_nodes[counter]=node_info
+						flag_exist=True
 						break
+
+			if flag_exist==False:
 				table_of_nodes.append(node_info)
 				
 		else:
@@ -164,6 +174,9 @@ def add_table(node_info):
 
 	finally:
 		lock.release()
+
+def convertStringIntoDatetime(string):
+	return datetime.strptime(string, "%Y-%m-%d %H:%M:%S.%f")
 
 class myThread (threading.Thread):
    def __init__(self, threadID):
@@ -180,8 +193,63 @@ class ThreadReceiver (threading.Thread):
    def run(self):
       receiver()
 
-def convertStringIntoDatetime(string):
-	return datetime.strptime(string, "%Y-%m-%d %H:%M:%S.%f")
+class ThreadSender (threading.Thread):
+   def __init__(self, threadID):
+      threading.Thread.__init__(self)
+      self.threadID = threadID
+   def run(self):
+      sender()
+
+class ThreadAndar(threading.Thread):
+   def __init__(self, threadID):
+      threading.Thread.__init__(self)
+      self.threadID = threadID
+   def run(self):
+      TocaAndar(int(float(sys.argv[2])),int(float(sys.argv[3])),int(float(sys.argv[4])),sys.argv[5])
+
+#-------------------------------------#
+#          Movimento do carro         #
+#-------------------------------------#
+
+def TocaAndar(x,y,co,dir):
+	global X
+	global Y
+	global DIR
+	global Co
+
+	#X=int(float(sys.argv[1]))
+	#Y=int(float(sys.argv[2]))
+	X=x
+	Y=y
+	Co[0]=X
+	Co[1]=Y
+	
+
+
+	#DIR=sys.argv[3]
+	DIR=dir
+	#coordenadas=int(sys.argv[4])
+	coordenadas=co
+
+	gpio_data = {}
+	gpio_data = read_gpio_conf('gpio_pins')
+
+	pwm_motor = {}
+	gpio_init(gpio_data, pwm_motor)
+
+	#thread1 = myThread("Thread-1")
+	#thread1.start()
+
+	andar(gpio_data,int(coordenadas),pwm_motor)
+	'''Actualiza coordenadas actuais'''
+	
+	
+	X=Co[0]
+	Y=Co[1]
+	#sleep(3)
+	#andar(gpio_data,int(coordenadas),pwm_motor)
+	if RASPBERRY == True:
+		GPIO.cleanup()
 
 
 def threadClock():
@@ -201,6 +269,149 @@ def threadClock():
 #  			table_of_nodes[counter][4] += 1 
  # 			time.sleep(1)
   #			counter += 1
+
+
+################################
+def read_gpio_conf(field):
+    print('read_gpio_conf')
+    with open('gpio_pins.txt') as json_data:
+        data = json.load(json_data)
+        print('gpio_pins  data: ', data)
+        json_data.close()
+    return data[field]
+
+
+def gpio_init(gpio_data, pwm_motor):
+    print ('gpio_init')
+    gpio_data = read_gpio_conf('gpio_pins')
+    if RASPBERRY == True:
+       GPIO.setmode(GPIO.BOARD)
+    print('GPIO.setmode(GPIO.BOARD)')
+    reset_gpio(gpio_data)
+    reset_pwm_motor(gpio_data, pwm_motor)
+    return (gpio_data, pwm_motor)
+
+def reset_gpio(gpio_data):
+    for key, val in list(gpio_data.items()):
+        if key != 'stop':
+            if RASPBERRY == True:
+                GPIO.setup(val,GPIO.OUT)
+                GPIO.output(val,GPIO.LOW)
+            print ('GPIO.setup(',val,',GPIO.OUT)')
+            print ('GPIO.output(',val,',GPIO.LOW)')
+
+
+def reset_pwm_motor(gpio_data, pwm_motor):
+    for key, val in list(gpio_data.items()):
+        if key in ('enable_dir'):
+            if RASPBERRY == True:
+                pwm_motor[key] = GPIO.PWM(val, FREQUENCY)
+                pwm_motor[key].start(MIN_SPEED)
+            print ('pwm_motor[',key,'] = GPIO.PWM(',val,',',FREQUENCY,')')
+            print ('pwm_motor[',key,'].start(',MIN_SPEED,')')
+    return pwm_motor
+
+def tempoParaAndar(coordenadas):
+	tempo=0
+	if coordenadas == 1:
+		tempo=1.185
+	if coordenadas == 2:
+		tempo=1.76
+	if coordenadas == 3:
+		tempo=2.062
+	if coordenadas == 4:
+		tempo=2.584
+	if coordenadas == 5:
+		tempo=2.964
+	if coordenadas>5:
+		tempo=(coordenadas-5)*0.4 + 2.964
+	return tempo
+
+
+def andar(gpio_data,coordenadas,pwm_motor):
+
+	global Timer
+	global EstaAndar
+	if RASPBERRY == True:
+		pwm_motor['enable_dir'].ChangeDutyCycle(MAX_FORWARD_SPEED)
+		GPIO.output(gpio_data['forward_dir'], GPIO.HIGH)
+		GPIO.output(gpio_data['backward_dir'], GPIO.LOW)
+		GPIO.output(gpio_data['enable_dir'], GPIO.HIGH)
+		
+	
+		EstaAndar=True
+		
+		Timer=time.time()
+		sleep (tempoParaAndar(coordenadas))
+		pwm_motor['enable_dir'].ChangeDutyCycle(MAX_BACKWARD_SPEED)
+		GPIO.output(gpio_data['backward_dir'], GPIO.LOW)
+		GPIO.output(gpio_data['forward_dir'], GPIO.LOW)
+		GPIO.output(gpio_data['enable_dir'], GPIO.HIGH)
+		sleep(0.5)
+		EstaAndar=False
+	
+	if RASPBERRY == False:
+		Timer=time.time()
+		lock1.acquire()
+		try:
+			EstaAndar=True
+		finally:
+			lock1.release()
+
+		print("Comecei a andar")
+		sleep (tempoParaAndar(coordenadas))
+	
+		lock1.acquire()
+		try:
+			EstaAndar=False
+		finally:
+			lock1.release()
+
+		print("Parei de andar")
+
+
+
+def getCoordenadas():
+	global Timer
+	global EstaAndar
+	global X
+	global Y
+	global DIR
+	global Co
+	coordenada = 0
+	
+	lock1.acquire()
+	try:
+		if EstaAndar==True:
+
+			tempo = time.time()-Timer
+			if 0.5<tempo<1.5:
+				coordenada = 1
+			if 1.5<tempo<2:
+				coordenada = 2
+			if 2<tempo<2.4:
+				coordenada =3
+			if 2.4<tempo<2.8:
+				coordenada =4
+			if 2.8<tempo<3:
+				coordenada = 5
+			if tempo>=3:
+				coordenada = int(((tempo-3)//0.4)+5)
+			if DIR=="x":
+				a=coordenada+X
+				Co[0]=a
+
+			if DIR == "y":
+				b=coordenada+Y
+				Co[1]=b
+
+	finally:
+		lock1.release()
+
+	return (Co[0],Co[1])
+
+
+################################
 
 if __name__ == '__main__':
     main() 

@@ -6,7 +6,6 @@ import uuid
 #from hashlib import blake2s
 import threading
 from datetime import datetime
-import cam_rsu
 import json
 import uuid
 
@@ -24,6 +23,13 @@ table_of_nodes=[]
 
 lock= threading.Lock()
 
+semaforo_1={'table':[],'state':"red",'zona':[[4,7],[5,7],[6,7],[7,7]],'cars':0}
+semaforo_2={'table':[],'state':"red",'zona':[],'cars':0}
+semaforo_3={'table':[],'state':"red",'zona':[[9,6],[9,5],[9,4],[9,3]],'cars':0}
+semaforo_4={'table':[],'state':"red",'zona':[],'cars':0}
+
+number_of_cars={'cars_in_1':0,'cars_in_2':0,'cars_in_3':0,'cars_in_4':0}
+
 def main():
 
 	global lock
@@ -32,15 +38,20 @@ def main():
 	NodeID = sys.argv[1]
 	print("Your node is: " + str(NodeID))
 
+	threadsender = ThreadSender("Thread-sender")
+	threadsender.start()
+
 	threadreceiver = ThreadReceiver("Thread-receiver")
 	threadreceiver.start()
-	sender()
+
+	threadalgoritmo=ThreadAlgoritmo("Thread-algoritmo")
+	threadalgoritmo.start()
 
 
 def sender():
 
 	gpsInfo= "(2,2)"
-	timeToSendMessage = time.time() + 2
+	timeToSendMessage = time.time() +0.5
 	while True:
 
 		lock.acquire()
@@ -53,16 +64,16 @@ def sender():
 
 			generate_messageID()
 
-			messageToSend = {'Type': 'Beacon', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.now())}
+			messageToSend = {'Type': 'Beacon', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.now()),'Message_ID': messageID}
 			
-			print("Message to send: " + str(messageToSend))
+			#print("Message to send: " + str(messageToSend))
 
 			data = json.dumps(messageToSend)
 
 			sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 			sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
 			sock.sendto(data.encode(), (MCAST_GRP, MCAST_PORT))
-			timeToSendMessage = time.time() + 10
+			timeToSendMessage = time.time() + 0.5
 
 def receiver():
 
@@ -79,7 +90,6 @@ def receiver():
  
 	while True:
 		
-		exist=False
 		data=sock.recv(1024)
 		messageReceived=data.decode()
 		node_info=json.loads(messageReceived)
@@ -94,7 +104,7 @@ def receiver():
 
 			if node_info['Type']=='CAM':
 				add_table(node_info)
-				cam_rsu.process_CAM(node_info)
+				process_CAM(node_info)
 
 def generate_messageID():
 	
@@ -102,7 +112,11 @@ def generate_messageID():
 	messageID += 1
 
 def add_table(node_info):
-	counter = -1
+	
+	global table_of_nodes
+
+	counter=-1
+	flag_exist=False
 
 	lock.acquire()
 	try:
@@ -111,10 +125,13 @@ def add_table(node_info):
 			for i in table_of_nodes:
 				counter += 1
 				if node_info['ID']==i['ID']:
-					print("Encontrei um com ID igual")
 					if convertStringIntoDatetime(node_info['Timestamp']) > convertStringIntoDatetime(i['Timestamp']):
+						print("Encontrei um com ID igual")
 						table_of_nodes[counter]=node_info
+						flag_exist=True
 						break
+
+			if flag_exist==False:
 				table_of_nodes.append(node_info)
 				
 		else:
@@ -140,6 +157,13 @@ class ThreadReceiver (threading.Thread):
    def run(self):
       receiver()
 
+class ThreadSender (threading.Thread):
+   def __init__(self, threadID):
+      threading.Thread.__init__(self)
+      self.threadID = threadID
+   def run(self):
+      sender()
+
 def convertStringIntoDatetime(string):
 	return datetime.strptime(string, "%Y-%m-%d %H:%M:%S.%f")
 
@@ -161,6 +185,168 @@ def threadClock():
 #  			table_of_nodes[counter][4] += 1 
  # 			time.sleep(1)
   #			counter += 1
+
+#-------------------------------------#
+# Tratamento das mensagens CAM na RSU #
+#-------------------------------------#
+
+def process_CAM(node_info):
+
+	pos=node_info['Coordinates']
+
+	filtro(node_info,pos)
+
+def filtro (node,posicao):
+
+	global semaforo_1
+	global semaforo_2
+	global semaforo_3
+	global semaforo_4
+
+	if posicao in semaforo_1['zona']:
+		semaforo_1['table']=add_table_rsu(node,"semaforo_1")
+
+	elif posicao in semaforo_2['zona']:
+		semaforo_2['table']=add_table_rsu(node,"semaforo_2")
+		return True
+
+	elif posicao in semaforo_3['zona']:
+		semaforo_3['table']=add_table_rsu(node,"semaforo_3")
+
+	elif posicao in semaforo_4['zona']:
+		semaforo_4['table']=add_table_rsu(node,"semaforo_4")
+
+	else:
+		print("fora da zona de interesse")
+
+		counter=0
+		id=node['ID']
+
+		for no in semaforo_1['table']:
+			if no['ID']==id:
+				del semaforo_1['table'][counter]
+				break
+
+			counter+=1
+
+		counter=0
+
+		for no in semaforo_2['table']:
+			if no['ID']==id:
+				del semaforo_2['table'][counter]
+				break
+
+			counter+=1
+
+		counter=0
+
+		for no in semaforo_3['table']:
+			if no['ID']==id:
+				del semaforo_3['table'][counter]
+				break
+
+			counter+=1
+
+		counter=0
+
+		for no in semaforo_4['table']:
+			if no['ID']==id:
+				del semaforo_4['table'][counter]
+				break
+
+			counter+=1
+
+def add_table_rsu(node_info,semaforo):
+	
+	counter = -1
+	flag_exist=False
+
+	if semaforo=="semaforo_1":
+		table=semaforo_1['table']
+	elif semaforo=="semaforo_2":
+		table=semaforo_2['table']
+	elif semaforo=="semaforo_3":
+		table=semaforo_3['table']
+	else:
+		table=semaforo_4['table']
+
+	lock.acquire()
+	try:
+		if len(table_of_nodes) > 0:
+
+			for i in table_of_nodes:
+				counter += 1
+				if node_info['ID']==i['ID']:
+					if convertStringIntoDatetime(node_info['Timestamp']) > convertStringIntoDatetime(i['Timestamp']):
+						print("Encontrei um com ID igual")
+						table_of_nodes[counter]=node_info
+						flag_exist=True
+						break
+
+			if flag_exist==False:
+				table_of_nodes.append(node_info)
+				
+		else:
+			table_of_nodes.append(node_info)
+
+		print("Tabela:" + str(table_of_nodes))
+
+	finally:
+		lock.release()
+
+	return table
+
+def count_cars():
+
+	global number_of_cars
+
+	number_of_cars['cars_in_1']=len(semaforo_1['table'])
+	number_of_cars['cars_in_2']=len(semaforo_2['table'])
+	number_of_cars['cars_in_3']=len(semaforo_3['table'])
+	number_of_cars['cars_in_4']=len(semaforo_4['table'])
+
+	print(number_of_cars)
+
+def decide_cor():
+
+	global semaforo_1
+	global semaforo_2
+	global semaforo_3
+	global semaforo_4
+
+	count_cars()
+
+
+	maior=max(number_of_cars,key=number_of_cars.get)
+
+	if maior=="cars_in_1" or maior=="cars_in_2":
+		semaforo_1['state']="green"
+		semaforo_2['state']="green"
+		semaforo_3['state']="red"
+		semaforo_4['state']="red"
+
+	elif maior=="cars_in_3" or maior=="cars_in_4":
+		semaforo_1['state']="red"
+		semaforo_2['state']="red"
+		semaforo_3['state']="green"
+		semaforo_4['state']="green"
+
+	print(semaforo_1['state'],semaforo_2['state'],semaforo_3['state'],semaforo_4['state'],"\n")
+	time_semaforo=1
+	timer_semaforo(time_semaforo)
+
+def timer_semaforo(timer):
+
+	time.sleep(timer)	
+	
+	decide_cor()
+
+class ThreadAlgoritmo (threading.Thread):
+   def __init__(self, threadID):
+      threading.Thread.__init__(self)
+      self.threadID = threadID
+   def run(self):
+      decide_cor()
 
 if __name__ == '__main__':
     main() 
