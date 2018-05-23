@@ -9,27 +9,11 @@ import datetime
 import cam_obu
 import json
 import uuid
-RASPBERRY = False
-import sys, json
-if RASPBERRY == True:
-	import RPi.GPIO as GPIO
-from time import sleep
-import time
-import threading
-
+import CarController
 
 MCAST_GRP = "224.0.0.1"
 MCAST_PORT = 10000
 
-
-##################################################
-
-
-FREQUENCY = 100
-MIN_SPEED = 0
-MAX_SPEED = 100
-MAX_FORWARD_SPEED = 60
-MAX_BACKWARD_SPEED =60
 SLEEP_TIME = 2
 Timer=0
 X=int(0)
@@ -67,85 +51,12 @@ def main():
 	thread1 = myThread("Thread-clock")
 	thread1.start()
 
-
-def sender():
-
-	time_increment=False
-
-	timeToSendMessage = time.time()
-
-	while True:
-
-		number_of_nodes=len(table_of_nodes)
-
-		if number_of_nodes==0:
-
-			while time.time() > timeToSendMessage:
-				
-				
-				gpsInfo=getCoordenadas()
-				
-				generate_messageID()
-
-				messageToSend = {'Type': 'Beacon', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.datetime.now())}
-				
-				print("Message to send: " + str(messageToSend))
-
-				data = json.dumps(messageToSend)
-
-				sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-				sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
-				sock.sendto(data.encode(), (MCAST_GRP, MCAST_PORT))
-				timeToSendMessage = time.time() + 5
-				#time_increment=True
-
-		else:
-
-			while time.time() > timeToSendMessage:
-				gpsInfo=getCoordenadas()
-				messageToSend = {'Type': 'CAM', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.datetime.now())}
-				data = json.dumps(messageToSend)
-				print("Message to send: " + str(messageToSend))
-				sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-				sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
-				sock.sendto(data.encode(), (MCAST_GRP, MCAST_PORT))
-				timeToSendMessage = time.time() + 5
-				
-
-def receiver():
-
-	sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-	sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-	sock.bind((MCAST_GRP, MCAST_PORT))
-	mreq = struct.pack("4sl", socket.inet_aton(MCAST_GRP), socket.INADDR_ANY)
-	sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
- 
-	while True:
-		
-		exist=False
-		data=sock.recv(1024)
-		messageReceived=data.decode()
-		node_info=json.loads(messageReceived)
-		node_info.update({'Received': str(datetime.datetime.now())})
-
-		if node_info['ID'] == NodeID:
-			continue
-
-		else:
-			print("Received the following message: \n" + str(node_info))
-			if node_info['Type']=='Beacon':
-				add_table(node_info)
-
-			if node_info['Type']=='CAM':
-				add_table(node_info)
-				cam_obu.process_CAM(node_info)
-
-def generate_messageID():
+def generateMessageId():
 	
 	global messageID
 	messageID += 1
 
-def add_table(node_info):
+def addToTable(node_info):
 
 	global table_of_nodes
 
@@ -186,73 +97,6 @@ class myThread (threading.Thread):
 	def run(self):
 		threadClock()
 
-
-class ThreadReceiver (threading.Thread):
-	def __init__(self, threadID):
-		threading.Thread.__init__(self)
-		self.threadID = threadID
-	def run(self):
-		receiver()
-
-class ThreadSender (threading.Thread):
-	def __init__(self, threadID):
-		threading.Thread.__init__(self)
-		self.threadID = threadID
-	def run(self):
-		sender()
-
-class ThreadAndar(threading.Thread):
-	def __init__(self, threadID):
-		threading.Thread.__init__(self)
-		self.threadID = threadID
-	def run(self):
-		TocaAndar(int(float(sys.argv[2])),int(float(sys.argv[3])),int(float(sys.argv[4])),sys.argv[5])
-
-#-------------------------------------#
-#          Movimento do carro         #
-#-------------------------------------#
-
-def TocaAndar(x,y,co,dir):
-	global X
-	global Y
-	global DIR
-	global Co
-
-	#X=int(float(sys.argv[1]))
-	#Y=int(float(sys.argv[2]))
-	X=x
-	Y=y
-	Co[0]=X
-	Co[1]=Y
-	
-
-
-	#DIR=sys.argv[3]
-	DIR=dir
-	#coordenadas=int(sys.argv[4])
-	coordenadas=co
-
-	gpio_data = {}
-	gpio_data = read_gpio_conf('gpio_pins')
-
-	pwm_motor = {}
-	gpio_init(gpio_data, pwm_motor)
-
-	#thread1 = myThread("Thread-1")
-	#thread1.start()
-
-	andar(gpio_data,int(coordenadas),pwm_motor)
-	'''Actualiza coordenadas actuais'''
-	
-	
-	X=Co[0]
-	Y=Co[1]
-	#sleep(3)
-	#andar(gpio_data,int(coordenadas),pwm_motor)
-	if RASPBERRY == True:
-		GPIO.cleanup()
-
-
 def threadClock():
 	global table_of_nodes
 
@@ -271,68 +115,164 @@ def threadClock():
 
 			counter += 1
 
+class ThreadReceiver (threading.Thread):
+	def __init__(self, threadID):
+		threading.Thread.__init__(self)
+		self.threadID = threadID
+	def run(self):
+		receiver()
+
+#Function that is responsible for receiving the messages to the network
+def receiver():
+
+	sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+	sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+	sock.bind((MCAST_GRP, MCAST_PORT))
+	mreq = struct.pack("4sl", socket.inet_aton(MCAST_GRP), socket.INADDR_ANY)
+	sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+ 
+	while True:
+		
+		exist=False
+		data=sock.recv(1024)
+		messageReceived=data.decode()
+		node_info=json.loads(messageReceived)
+		node_info.update({'Received': str(datetime.datetime.now())})
+
+		#Filter to ignore the own messages sent
+		if node_info['ID'] == NodeID:
+			continue
+
+		else:
+			print("Received the following message: \n" + str(node_info))
+			if node_info['Type']=='Beacon':
+				addToTable(node_info)
+
+			if node_info['Type']=='CAM':
+				addToTable(node_info)
+				cam_obu.process_CAM(node_info)
+
+
+class ThreadSender (threading.Thread):
+	def __init__(self, threadID):
+		threading.Thread.__init__(self)
+		self.threadID = threadID
+	def run(self):
+		sender()
+
+#Function that is responsible for sending the messages to the network
+def sender():
+
+	time_increment=False
+
+	timeToSendMessage = time.time()
+
+	while True:
+
+		number_of_nodes=len(table_of_nodes)
+
+		#If the table of neighbors is empty, then a Beacon message will be generated.
+		#Otherwise, a CA message is generated.
+		if number_of_nodes==0:
+
+			while time.time() > timeToSendMessage:
+				
+				
+				gpsInfo=getCoordinates()
+				
+				generateMessageId()
+
+				messageToSend = {'Type': 'Beacon', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.datetime.now())}
+				
+				print("Message to send: " + str(messageToSend))
+
+				data = json.dumps(messageToSend)
+
+				sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+				sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
+				sock.sendto(data.encode(), (MCAST_GRP, MCAST_PORT))
+				timeToSendMessage = time.time() + 5
+				#time_increment=True
+
+		else:
+
+			while time.time() > timeToSendMessage:
+				gpsInfo=getCoordinates()
+				messageToSend = {'Type': 'CAM', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.datetime.now())}
+				data = json.dumps(messageToSend)
+				print("Message to send: " + str(messageToSend))
+				sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+				sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
+				sock.sendto(data.encode(), (MCAST_GRP, MCAST_PORT))
+				timeToSendMessage = time.time() + 5
+				
+
+class ThreadAndar(threading.Thread):
+	def __init__(self, threadID):
+		threading.Thread.__init__(self)
+		self.threadID = threadID
+	def run(self):
+		TocaAndar(int(float(sys.argv[2])),int(float(sys.argv[3])),int(float(sys.argv[4])),sys.argv[5])
+
+def TocaAndar(x,y,co,dir):
+	global X
+	global Y
+	global DIR
+	global Co
+
+	#X=int(float(sys.argv[1]))
+	#Y=int(float(sys.argv[2]))
+	X=x
+	Y=y
+	Co[0]=X
+	Co[1]=Y
+	
+	#DIR=sys.argv[3]
+	DIR=dir
+	#coordenadas=int(sys.argv[4])
+	coordenadas=co
+
+	gpio_data = {}
+	gpio_data = CarController.read_gpio_conf('gpio_pins')
+
+	pwm_motor = {}
+	CarController.gpio_init(gpio_data, pwm_motor)
+
+	andar(gpio_data,int(coordenadas),pwm_motor)
+	'''Actualiza coordenadas actuais'''
+	
+	X=Co[0]
+	Y=Co[1]
+	#sleep(3)
+	#andar(gpio_data,int(coordenadas),pwm_motor)
+	if RASPBERRY == True:
+		GPIO.cleanup()
 
 ################################
-def read_gpio_conf(field):
-	print('read_gpio_conf')
-	with open('gpio_pins.txt') as json_data:
-		data = json.load(json_data)
-		print('gpio_pins  data: ', data)
-		json_data.close()
-	return data[field]
-
-
-def gpio_init(gpio_data, pwm_motor):
-	print ('gpio_init')
-	gpio_data = read_gpio_conf('gpio_pins')
-	if RASPBERRY == True:
-	   GPIO.setmode(GPIO.BOARD)
-	print('GPIO.setmode(GPIO.BOARD)')
-	reset_gpio(gpio_data)
-	reset_pwm_motor(gpio_data, pwm_motor)
-	return (gpio_data, pwm_motor)
-
-def reset_gpio(gpio_data):
-	for key, val in list(gpio_data.items()):
-		if key != 'stop':
-			if RASPBERRY == True:
-				GPIO.setup(val,GPIO.OUT)
-				GPIO.output(val,GPIO.LOW)
-			print ('GPIO.setup(',val,',GPIO.OUT)')
-			print ('GPIO.output(',val,',GPIO.LOW)')
-
-
-def reset_pwm_motor(gpio_data, pwm_motor):
-	for key, val in list(gpio_data.items()):
-		if key in ('enable_dir'):
-			if RASPBERRY == True:
-				pwm_motor[key] = GPIO.PWM(val, FREQUENCY)
-				pwm_motor[key].start(MIN_SPEED)
-			print ('pwm_motor[',key,'] = GPIO.PWM(',val,',',FREQUENCY,')')
-			print ('pwm_motor[',key,'].start(',MIN_SPEED,')')
-	return pwm_motor
 
 def tempoParaAndar(coordenadas):
 	tempo=0
+
 	if coordenadas == 1:
 		tempo=1.185
-	if coordenadas == 2:
+	elif coordenadas == 2:
 		tempo=1.76
-	if coordenadas == 3:
+	elif coordenadas == 3:
 		tempo=2.062
-	if coordenadas == 4:
+	elif coordenadas == 4:
 		tempo=2.584
-	if coordenadas == 5:
+	elif coordenadas == 5:
 		tempo=2.964
-	if coordenadas>5:
+	elif coordenadas>5:
 		tempo=(coordenadas-5)*0.4 + 2.964
+	
 	return tempo
-
 
 def andar(gpio_data,coordenadas,pwm_motor):
 
 	global Timer
 	global EstaAndar
+
 	if RASPBERRY == True:
 		pwm_motor['enable_dir'].ChangeDutyCycle(MAX_FORWARD_SPEED)
 		GPIO.output(gpio_data['forward_dir'], GPIO.HIGH)
@@ -371,8 +311,7 @@ def andar(gpio_data,coordenadas,pwm_motor):
 		print("Parei de andar")
 
 
-
-def getCoordenadas():
+def getCoordinates():
 	global Timer
 	global EstaAndar
 	global X
@@ -410,7 +349,6 @@ def getCoordenadas():
 		lock1.release()
 
 	return (Co[0],Co[1])
-
 
 ################################
 
