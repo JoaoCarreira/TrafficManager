@@ -8,14 +8,13 @@ import threading
 from datetime import datetime
 import json
 import uuid
+import RPi.GPIO as gpio
+
 
 MCAST_GRP = "224.0.0.1"
 MCAST_PORT = 10000
 
-#mac_addr = hex(uuid.getnode()).replace('0x', '')
-#NodeID = ':'.join(mac_addr[i : i + 2] for i in range(0, 11, 2))
-
-NodeID = 0
+NodeID = hex(uuid.getnode()).replace('0x', '')
 
 messageID = 0
 
@@ -30,12 +29,18 @@ semaforo_4={'table':[],'state':"red",'zona':[],'cars':0}
 
 number_of_cars={'cars_in_1':0,'cars_in_2':0,'cars_in_3':0,'cars_in_4':0}
 
+old_state=""
+
+gpio.setmode(gpio.BOARD)
+gpio.setwarnings(False)
+gpio.setup(38,gpio.OUT)
+gpio.setup(40,gpio.OUT)
+gpio.setup(36,gpio.OUT)
+
 def main():
 
 	global lock
-	global NodeID
 
-	NodeID = sys.argv[1]
 	print("Your node is: " + str(NodeID))
 
 	threadsender = ThreadSender("Thread-sender")
@@ -98,7 +103,7 @@ def receiver():
 			continue
 
 		else:
-			print("Received the following message: \n" + str(json.loads(messageReceived)))
+			#print("Received the following message: \n" + str(json.loads(messageReceived)))
 			if node_info['Type']=='Beacon':
 				add_table(node_info)
 
@@ -112,7 +117,7 @@ def generate_messageID():
 	messageID += 1
 
 def add_table(node_info):
-	
+
 	global table_of_nodes
 
 	counter=-1
@@ -126,7 +131,7 @@ def add_table(node_info):
 				counter += 1
 				if node_info['ID']==i['ID']:
 					if convertStringIntoDatetime(node_info['Timestamp']) > convertStringIntoDatetime(i['Timestamp']):
-						print("Encontrei um com ID igual")
+						#print("Encontrei um com ID igual")
 						table_of_nodes[counter]=node_info
 						flag_exist=True
 						break
@@ -137,7 +142,7 @@ def add_table(node_info):
 		else:
 			table_of_nodes.append(node_info)
 
-		print("Tabela:" + str(table_of_nodes))
+		#print("Tabela:" + str(table_of_nodes))
 
 	finally:
 		lock.release()
@@ -272,24 +277,23 @@ def add_table_rsu(node_info,semaforo):
 
 	lock.acquire()
 	try:
-		if len(table_of_nodes) > 0:
-
-			for i in table_of_nodes:
+		if len(table) > 0:
+			for i in table:
 				counter += 1
 				if node_info['ID']==i['ID']:
 					if convertStringIntoDatetime(node_info['Timestamp']) > convertStringIntoDatetime(i['Timestamp']):
-						print("Encontrei um com ID igual")
-						table_of_nodes[counter]=node_info
+						#print("Encontrei um com ID igual")
+						table[counter]=node_info
 						flag_exist=True
 						break
 
 			if flag_exist==False:
-				table_of_nodes.append(node_info)
+				table.append(node_info)
 				
 		else:
-			table_of_nodes.append(node_info)
+			table.append(node_info)
 
-		print("Tabela:" + str(table_of_nodes))
+		#print("Tabela:" + str(table_of_nodes))
 
 	finally:
 		lock.release()
@@ -307,38 +311,121 @@ def count_cars():
 
 	print(number_of_cars)
 
+
 def decide_cor():
 
 	global semaforo_1
 	global semaforo_2
 	global semaforo_3
 	global semaforo_4
+	global old_state
 
 	count_cars()
-
-
+	last_vehicle=""
 	maior=max(number_of_cars,key=number_of_cars.get)
 
-	if maior=="cars_in_1" or maior=="cars_in_2":
-		semaforo_1['state']="green"
-		semaforo_2['state']="green"
-		semaforo_3['state']="red"
-		semaforo_4['state']="red"
+	if 0 not in number_of_cars.values():
+		alterar_estado=True
 
+
+	if maior=="cars_in_1" or maior=="cars_in_2":
+
+		new_state="semaforo_1_2"
+
+		if maior=="cars_in_1" and len(semaforo_1['table'])!=0:
+			last_vehicle=semaforo_1['table'][-1]['ID'] #ultimo carro na zona do semaforo_1
+
+		elif maior=="cars_in_2" and len(semaforo_1['table'])!=0:
+			last_vehicle=semaforo_2['table'][-1]['ID'] #ultimo carro na zona do semaforo_2
+		else:
+			old_state=changeState(new_state)
+			time.sleep(5)
+			new_state="semaforo_3_4"
+
+	
 	elif maior=="cars_in_3" or maior=="cars_in_4":
-		semaforo_1['state']="red"
-		semaforo_2['state']="red"
-		semaforo_3['state']="green"
-		semaforo_4['state']="green"
+
+		new_state="semaforo_3_4"
+
+		if maior=="cars_in_3" and len(semaforo_1['table'])!=0:
+			last_vehicle=semaforo_3['table'][-1]['ID'] #ultimo carro na zona do semaforo_3
+		elif maior=="cars_in_3"and len(semaforo_1['table'])!=0:
+			last_vehicle=semaforo_4['table'][-1]['ID'] #ultimo carro na zona do semaforo_4
+
+	old_state=changeState(new_state)
+	
 
 	print(semaforo_1['state'],semaforo_2['state'],semaforo_3['state'],semaforo_4['state'],"\n")
-	time_semaforo=1
-	timer_semaforo(time_semaforo)
 
-def timer_semaforo(timer):
+	timer_semaforo(new_state,last_vehicle)
 
-	time.sleep(timer)	
-	
+def changeState(state):
+
+	print(state)
+
+	if state!=old_state:
+		if state=="semaforo_1_2":
+
+			gpio.output(40,gpio.HIGH)
+			gpio.output(38,gpio.LOW)
+			gpio.output(36,gpio.LOW)
+
+			semaforo_1['state']="green"
+			semaforo_2['state']="green"
+			semaforo_3['state']="red"
+			semaforo_4['state']="red"
+
+		elif state=="semaforo_3_4":
+
+			gpio.output(40,gpio.LOW)
+			gpio.output(38,gpio.HIGH)
+			gpio.output(36,gpio.LOW)
+
+			time.sleep(1)
+
+			gpio.output(40,gpio.LOW)
+			gpio.output(38,gpio.LOW)
+			gpio.output(36,gpio.HIGH)
+
+			semaforo_1['state']="red"
+			semaforo_2['state']="red"
+			semaforo_3['state']="green"
+			semaforo_4['state']="green"
+
+	return state
+
+def timer_semaforo(state,last_vehicle):
+
+	flag_last_car=True
+	if last_vehicle!="":
+		while flag_last_car==True:
+			flag_last_car= False
+			if state=="semaforo_1_2":
+				for i in semaforo_1['table']:
+					if i['ID']==last_vehicle:
+						flag_last_car=True
+						break
+
+				for i in semaforo_2['table']:
+					if i['ID']==last_vehicle:
+						flag_last_car=True
+						break
+
+			if state=="semaforo_3_4":
+				for i in semaforo_3['table']:
+					if i['ID']==last_vehicle:
+						flag_last_car=True
+						break
+
+				for i in semaforo_4['table']:
+					if i['ID']==last_vehicle:
+						flag_last_car=True
+						break
+
+	else:
+		time.sleep(5)
+		flag_last_car==False
+
 	decide_cor()
 
 class ThreadAlgoritmo (threading.Thread):
