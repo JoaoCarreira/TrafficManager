@@ -5,14 +5,14 @@ import time
 import uuid
 #from hashlib import blake2s
 import threading
-from datetime import datetime
+import datetime
 import cam_obu
 import json
 import uuid
 RASPBERRY = False
 import sys, json
 if RASPBERRY == True:
-    import RPi.GPIO as GPIO
+	import RPi.GPIO as GPIO
 from time import sleep
 import time
 import threading
@@ -64,6 +64,8 @@ def main():
 	threadAndar.start()
 	threadsender = ThreadSender("Thread-sender")
 	threadsender.start()
+	thread1 = myThread("Thread-clock")
+	thread1.start()
 
 
 def sender():
@@ -85,7 +87,7 @@ def sender():
 				
 				generate_messageID()
 
-				messageToSend = {'Type': 'Beacon', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.now())}
+				messageToSend = {'Type': 'Beacon', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.datetime.now())}
 				
 				print("Message to send: " + str(messageToSend))
 
@@ -94,25 +96,23 @@ def sender():
 				sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 				sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
 				sock.sendto(data.encode(), (MCAST_GRP, MCAST_PORT))
-				timeToSendMessage = time.time() + 0.5
+				timeToSendMessage = time.time() + 5
 				#time_increment=True
 
 		else:
 
 			while time.time() > timeToSendMessage:
 				gpsInfo=getCoordenadas()
-				messageToSend = {'Type': 'CAM', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.now())}
+				messageToSend = {'Type': 'CAM', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.datetime.now())}
 				data = json.dumps(messageToSend)
 				print("Message to send: " + str(messageToSend))
 				sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 				sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
 				sock.sendto(data.encode(), (MCAST_GRP, MCAST_PORT))
-				timeToSendMessage = time.time() + 0.5
+				timeToSendMessage = time.time() + 5
 				
 
 def receiver():
-	#thread1 = myThread("Thread-1")
-	#thread1.start()
 
 	sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 	sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -126,12 +126,13 @@ def receiver():
 		data=sock.recv(1024)
 		messageReceived=data.decode()
 		node_info=json.loads(messageReceived)
+		node_info.update({'Received': str(datetime.datetime.now())})
 
 		if node_info['ID'] == NodeID:
 			continue
 
 		else:
-			print("Received the following message: \n" + str(json.loads(messageReceived)))
+			print("Received the following message: \n" + str(node_info))
 			if node_info['Type']=='Beacon':
 				add_table(node_info)
 
@@ -176,36 +177,36 @@ def add_table(node_info):
 		lock.release()
 
 def convertStringIntoDatetime(string):
-	return datetime.strptime(string, "%Y-%m-%d %H:%M:%S.%f")
+	return datetime.datetime.strptime(string, "%Y-%m-%d %H:%M:%S.%f")
 
 class myThread (threading.Thread):
-   def __init__(self, threadID):
-      threading.Thread.__init__(self)
-      self.threadID = threadID
-   def run(self):
-      threadClock()
+	def __init__(self, threadID):
+		threading.Thread.__init__(self)
+		self.threadID = threadID
+	def run(self):
+		threadClock()
 
 
 class ThreadReceiver (threading.Thread):
-   def __init__(self, threadID):
-      threading.Thread.__init__(self)
-      self.threadID = threadID
-   def run(self):
-      receiver()
+	def __init__(self, threadID):
+		threading.Thread.__init__(self)
+		self.threadID = threadID
+	def run(self):
+		receiver()
 
 class ThreadSender (threading.Thread):
-   def __init__(self, threadID):
-      threading.Thread.__init__(self)
-      self.threadID = threadID
-   def run(self):
-      sender()
+	def __init__(self, threadID):
+		threading.Thread.__init__(self)
+		self.threadID = threadID
+	def run(self):
+		sender()
 
 class ThreadAndar(threading.Thread):
-   def __init__(self, threadID):
-      threading.Thread.__init__(self)
-      self.threadID = threadID
-   def run(self):
-      TocaAndar(int(float(sys.argv[2])),int(float(sys.argv[3])),int(float(sys.argv[4])),sys.argv[5])
+	def __init__(self, threadID):
+		threading.Thread.__init__(self)
+		self.threadID = threadID
+	def run(self):
+		TocaAndar(int(float(sys.argv[2])),int(float(sys.argv[3])),int(float(sys.argv[4])),sys.argv[5])
 
 #-------------------------------------#
 #          Movimento do carro         #
@@ -258,58 +259,58 @@ def threadClock():
 	while True:
 		counter = 0
 
-		#for i in table_of_nodes:
+		for i in table_of_nodes:
 
-  			#if i[4]==15:
-  			
-  				#print("TIMEOUT \nDeleting the table entry of the NodeID=" + table_of_nodes[counter][0]+ " ...")
-  				#del(table_of_nodes[counter])
-  				#continue
+			if (convertStringIntoDatetime(i['Received']) + datetime.timedelta(seconds=5)) < datetime.datetime.now():
+				
+				print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+				print("TIMEOUT \nDeleting the table entry of the NodeID=" + table_of_nodes[counter]['ID']+ " ...")
+				print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")                  
+				del(table_of_nodes[counter])
+				continue
 
-#  			table_of_nodes[counter][4] += 1 
- # 			time.sleep(1)
-  #			counter += 1
+			counter += 1
 
 
 ################################
 def read_gpio_conf(field):
-    print('read_gpio_conf')
-    with open('gpio_pins.txt') as json_data:
-        data = json.load(json_data)
-        print('gpio_pins  data: ', data)
-        json_data.close()
-    return data[field]
+	print('read_gpio_conf')
+	with open('gpio_pins.txt') as json_data:
+		data = json.load(json_data)
+		print('gpio_pins  data: ', data)
+		json_data.close()
+	return data[field]
 
 
 def gpio_init(gpio_data, pwm_motor):
-    print ('gpio_init')
-    gpio_data = read_gpio_conf('gpio_pins')
-    if RASPBERRY == True:
-       GPIO.setmode(GPIO.BOARD)
-    print('GPIO.setmode(GPIO.BOARD)')
-    reset_gpio(gpio_data)
-    reset_pwm_motor(gpio_data, pwm_motor)
-    return (gpio_data, pwm_motor)
+	print ('gpio_init')
+	gpio_data = read_gpio_conf('gpio_pins')
+	if RASPBERRY == True:
+	   GPIO.setmode(GPIO.BOARD)
+	print('GPIO.setmode(GPIO.BOARD)')
+	reset_gpio(gpio_data)
+	reset_pwm_motor(gpio_data, pwm_motor)
+	return (gpio_data, pwm_motor)
 
 def reset_gpio(gpio_data):
-    for key, val in list(gpio_data.items()):
-        if key != 'stop':
-            if RASPBERRY == True:
-                GPIO.setup(val,GPIO.OUT)
-                GPIO.output(val,GPIO.LOW)
-            print ('GPIO.setup(',val,',GPIO.OUT)')
-            print ('GPIO.output(',val,',GPIO.LOW)')
+	for key, val in list(gpio_data.items()):
+		if key != 'stop':
+			if RASPBERRY == True:
+				GPIO.setup(val,GPIO.OUT)
+				GPIO.output(val,GPIO.LOW)
+			print ('GPIO.setup(',val,',GPIO.OUT)')
+			print ('GPIO.output(',val,',GPIO.LOW)')
 
 
 def reset_pwm_motor(gpio_data, pwm_motor):
-    for key, val in list(gpio_data.items()):
-        if key in ('enable_dir'):
-            if RASPBERRY == True:
-                pwm_motor[key] = GPIO.PWM(val, FREQUENCY)
-                pwm_motor[key].start(MIN_SPEED)
-            print ('pwm_motor[',key,'] = GPIO.PWM(',val,',',FREQUENCY,')')
-            print ('pwm_motor[',key,'].start(',MIN_SPEED,')')
-    return pwm_motor
+	for key, val in list(gpio_data.items()):
+		if key in ('enable_dir'):
+			if RASPBERRY == True:
+				pwm_motor[key] = GPIO.PWM(val, FREQUENCY)
+				pwm_motor[key].start(MIN_SPEED)
+			print ('pwm_motor[',key,'] = GPIO.PWM(',val,',',FREQUENCY,')')
+			print ('pwm_motor[',key,'].start(',MIN_SPEED,')')
+	return pwm_motor
 
 def tempoParaAndar(coordenadas):
 	tempo=0
@@ -414,4 +415,4 @@ def getCoordenadas():
 ################################
 
 if __name__ == '__main__':
-    main() 
+	main() 
