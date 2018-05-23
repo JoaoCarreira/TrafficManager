@@ -133,11 +133,12 @@ def receiver():
  
 	while True:
 		
-		exist=False
 		data=sock.recv(1024)
 		messageReceived=data.decode()
 		node_info=json.loads(messageReceived)
 		node_info.update({'Received': str(datetime.datetime.now())})
+
+		print("cona")
 
 		#Filter to ignore the own messages sent
 		if node_info['ID'] == NodeID:
@@ -191,7 +192,7 @@ def sender():
 				sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 				sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
 				sock.sendto(data.encode(), (MCAST_GRP, MCAST_PORT))
-				timeToSendMessage = time.time() + 5
+				timeToSendMessage = time.time() + 0.5
 				#time_increment=True
 
 		else:
@@ -204,7 +205,7 @@ def sender():
 				sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 				sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
 				sock.sendto(data.encode(), (MCAST_GRP, MCAST_PORT))
-				timeToSendMessage = time.time() + 5
+				timeToSendMessage = time.time() + 0.5
 				
 
 class ThreadAndar(threading.Thread):

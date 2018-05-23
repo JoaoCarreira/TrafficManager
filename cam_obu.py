@@ -1,11 +1,13 @@
 import sys
 from datetime import datetime
 import time
-
+import threading
 
 table_of_nodes=[]
 gpsInfo= "(2,2)"
 NodeID=0
+
+lock = threading.Lock()
 
 def generate_message(Node,messageID):
 	global NodeID
