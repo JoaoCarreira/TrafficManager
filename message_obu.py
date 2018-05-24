@@ -1,18 +1,13 @@
-import struct
-import socket
 import sys
 import time
 import uuid
-#from hashlib import blake2s
 import threading
 import datetime
-import cam_obu
 import json
 import uuid
 import CarController
-
-MCAST_GRP = "224.0.0.1"
-MCAST_PORT = 10000
+import Communication
+import cam_obu
 
 SLEEP_TIME = 2
 Timer=0
@@ -23,13 +18,9 @@ DIR="direçao"
 EstaAndar=False
 lock1 = threading.Lock()
 
-######################################
-#mac_addr = hex(uuid.getnode()).replace('0x', '')
-#NodeID = ':'.join(mac_addr[i : i + 2] for i in range(0, 11, 2))
+#NodeID = hex(uuid.getnode()).replace('0x', '')
 
 NodeID = 0
-
-messageID = 0
 
 table_of_nodes=[]
 
@@ -37,44 +28,46 @@ lock= threading.Lock()
 
 def main():
 
-	global lock
 	global NodeID
+
 	NodeID = sys.argv[1]
 	print("Your node is: " + str(NodeID))
 
 	threadreceiver = ThreadReceiver("Thread-receiver")
 	threadreceiver.start()
-	threadAndar = ThreadAndar("Thread-andar")
-	threadAndar.start()
+	#threadAndar = ThreadAndar("Thread-andar")
+	#threadAndar.start()
 	threadsender = ThreadSender("Thread-sender")
 	threadsender.start()
 	thread1 = myThread("Thread-clock")
 	thread1.start()
 
-def generateMessageId():
+def incrementMessageID(id):
 	
-	global messageID
-	messageID += 1
+	return id + 1
 
 def addToTable(node_info):
 
 	global table_of_nodes
 
-	counter=-1
+	counter = 0
 	flag_exist=False
 
 	lock.acquire()
 	try:
 		if len(table_of_nodes) > 0:
-
 			for i in table_of_nodes:
-				counter += 1
 				if node_info['ID']==i['ID']:
-					if convertStringIntoDatetime(node_info['Timestamp']) > convertStringIntoDatetime(i['Timestamp']):
-						print("Encontrei um com ID igual")
+					if node_info['Type'] == 'CAM' and i['Type'] == 'Beacon':
 						table_of_nodes[counter]=node_info
 						flag_exist=True
 						break
+					if convertStringIntoDatetime(node_info['Timestamp']) > convertStringIntoDatetime(i['Timestamp']):
+						table_of_nodes[counter]=node_info
+						flag_exist=True
+						break
+				counter += 1
+
 
 			if flag_exist==False:
 				table_of_nodes.append(node_info)
@@ -82,7 +75,9 @@ def addToTable(node_info):
 		else:
 			table_of_nodes.append(node_info)
 
+		print("....................................")
 		print("Tabela:" + str(table_of_nodes))
+		print("....................................")
 
 	finally:
 		lock.release()
@@ -105,8 +100,8 @@ def threadClock():
 
 		for i in table_of_nodes:
 
-			if (convertStringIntoDatetime(i['Received']) + datetime.timedelta(seconds=5)) < datetime.datetime.now():
-				
+			if (convertStringIntoDatetime(i['Received']) + datetime.timedelta(seconds=10)) < datetime.datetime.now():
+
 				print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 				print("TIMEOUT \nDeleting the table entry of the NodeID=" + table_of_nodes[counter]['ID']+ " ...")
 				print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")                  
@@ -125,20 +120,12 @@ class ThreadReceiver (threading.Thread):
 #Function that is responsible for receiving the messages to the network
 def receiver():
 
-	sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-	sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-	sock.bind((MCAST_GRP, MCAST_PORT))
-	mreq = struct.pack("4sl", socket.inet_aton(MCAST_GRP), socket.INADDR_ANY)
-	sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+	sock = Communication.setReceiver()
  
 	while True:
 		
-		data=sock.recv(1024)
-		messageReceived=data.decode()
-		node_info=json.loads(messageReceived)
+		node_info = json.loads(Communication.receiveMessage(sock))
 		node_info.update({'Received': str(datetime.datetime.now())})
-
-		print("cona")
 
 		#Filter to ignore the own messages sent
 		if node_info['ID'] == NodeID:
@@ -151,7 +138,7 @@ def receiver():
 
 			if node_info['Type']=='CAM':
 				addToTable(node_info)
-				cam_obu.process_CAM(node_info)
+				#cam_obu.process_CAM(node_info)
 
 
 class ThreadSender (threading.Thread):
@@ -164,48 +151,67 @@ class ThreadSender (threading.Thread):
 #Function that is responsible for sending the messages to the network
 def sender():
 
+	messageID = 0
+
 	time_increment=False
 
 	timeToSendMessage = time.time()
 
-	while True:
+	camBuffer = []
 
-		number_of_nodes=len(table_of_nodes)
+	while True:
 
 		#If the table of neighbors is empty, then a Beacon message will be generated.
 		#Otherwise, a CA message is generated.
-		if number_of_nodes==0:
 
-			while time.time() > timeToSendMessage:
+		while time.time() > timeToSendMessage:
 				
-				
-				gpsInfo=getCoordinates()
-				
-				generateMessageId()
+			gpsInfo=getCoordinates()
+			
+			messageID = incrementMessageID(messageID)
 
-				messageToSend = {'Type': 'Beacon', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.datetime.now())}
-				
-				print("Message to send: " + str(messageToSend))
+			beaconMessage = {'Type': 'Beacon', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.datetime.now())}
+			
+			camMessage = {'Type': 'CAM', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.datetime.now())}
 
-				data = json.dumps(messageToSend)
+			data = None
 
-				sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-				sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
-				sock.sendto(data.encode(), (MCAST_GRP, MCAST_PORT))
-				timeToSendMessage = time.time() + 0.5
-				#time_increment=True
+			if len(table_of_nodes) == 0:
 
-		else:
+				print("Message to send: " + str(beaconMessage))
 
-			while time.time() > timeToSendMessage:
-				gpsInfo=getCoordinates()
-				messageToSend = {'Type': 'CAM', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.datetime.now())}
-				data = json.dumps(messageToSend)
-				print("Message to send: " + str(messageToSend))
-				sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-				sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
-				sock.sendto(data.encode(), (MCAST_GRP, MCAST_PORT))
-				timeToSendMessage = time.time() + 0.5
+				data = json.dumps(beaconMessage)
+
+				counter = 0
+
+				if len(camBuffer) == 0:
+					print("First message CA on buffer")
+					camBuffer.append(camMessage)
+
+				else:
+
+					for i in camBuffer:
+						if i['Type'] == 'CAM':
+							print("Updating CAM on buffer")
+							i = camMessage
+						
+						counter += 1
+
+			
+			else:
+
+				print("Message to send: " + str(beaconMessage))
+
+				for i in camBuffer:
+					if i['Type'] == 'CAM':
+						print("Sending CAM from the buffer")
+						camMessage = i
+						camBuffer.remove(i)
+
+				data = json.dumps(camMessage)
+
+			Communication.sendMessage(data)
+			timeToSendMessage = time.time() + 0.5
 				
 
 class ThreadAndar(threading.Thread):
