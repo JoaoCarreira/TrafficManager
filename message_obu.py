@@ -37,8 +37,8 @@ def main():
 
 	threadreceiver = ThreadReceiver("Thread-receiver")
 	threadreceiver.start()
-	threadAndar = ThreadAndar("Thread-andar")
-	threadAndar.start()
+	#threadAndar = ThreadAndar("Thread-andar")
+	#threadAndar.start()
 	threadsender = ThreadSender("Thread-sender")
 	threadsender.start()
 	thread1 = myThread("Thread-clock")
@@ -61,19 +61,18 @@ def addToTable(node_info):
 		if len(table_of_nodes) > 0:
 			for i in table_of_nodes:
 				if node_info['ID']==i['ID']:
+					if node_info['Type'] == 'CAM' and i['Type'] == 'Beacon':
+						table_of_nodes[counter]=node_info
+						flag_exist=True
+						break
 					if convertStringIntoDatetime(node_info['Timestamp']) > convertStringIntoDatetime(i['Timestamp']):
 						table_of_nodes[counter]=node_info
 						flag_exist=True
 						break
-					if node_info['Type'] == 'CAM' and i['Type']:
-						table_of_nodes[counter]=node_info
-						flag_exist=True
-						break
-			counter += 1
+				counter += 1
 
 
 			if flag_exist==False:
-				print("CONA")
 				table_of_nodes.append(node_info)
 				
 		else:
@@ -104,8 +103,8 @@ def threadClock():
 
 		for i in table_of_nodes:
 
-			if (convertStringIntoDatetime(i['Received']) + datetime.timedelta(seconds=5)) < datetime.datetime.now():
-				
+			if (convertStringIntoDatetime(i['Received']) + datetime.timedelta(seconds=10)) < datetime.datetime.now():
+
 				print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 				print("TIMEOUT \nDeleting the table entry of the NodeID=" + table_of_nodes[counter]['ID']+ " ...")
 				print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")                  
@@ -208,6 +207,7 @@ def sender():
 					if i['Type'] == 'CAM':
 						print("Sending CAM from the buffer")
 						camMessage = i
+						camBuffer.remove(i)
 
 				data = json.dumps(camMessage)
 
