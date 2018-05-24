@@ -8,13 +8,15 @@ import uuid
 import RPi.GPIO as gpio
 import Communication
 
-NodeID = hex(uuid.getnode()).replace('0x', '')
+TIME_CHANGE_WITHOUT_CARS=10
+TIME_YELLOW=1
 
-messageID = 0
+NodeID = hex(uuid.getnode()).replace('0x', '')
 
 table_of_nodes=[]
 
 lock= threading.Lock()
+lock_app= threading.Lock()
 
 semaforo_1={'table':[],'state':"red",'zona':[[4,7],[5,7],[6,7],[7,7]],'cars':0}
 semaforo_2={'table':[],'state':"red",'zona':[],'cars':0}
@@ -30,6 +32,7 @@ gpio.setwarnings(False)
 gpio.setup(38,gpio.OUT)
 gpio.setup(40,gpio.OUT)
 gpio.setup(36,gpio.OUT)
+
 
 def main():
 
@@ -49,7 +52,7 @@ def main():
 
 def sender():
 
-	gpsInfo= "(2,2)"
+	gpsInfo= [8,8]
 	timeToSendMessage = time.time() +0.5
 	while True:
 
@@ -61,9 +64,7 @@ def sender():
 
 		while time.time() > timeToSendMessage:
 
-			generate_messageID()
-
-			messageToSend = {'Type': 'Beacon', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.now()),'Message_ID': messageID}
+			messageToSend = {'Type': 'Beacon', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.now())}
 			
 			#print("Message to send: " + str(messageToSend))
 
@@ -76,8 +77,9 @@ def receiver():
 
 	global table_of_nodes
 
-	#thread1 = myThread("Thread-1")
-	#thread1.start()
+
+	thread1 = myThread("Thread-1")
+	thread1.start()
 
 	sock = Communication.setReceiver()
  
@@ -97,10 +99,6 @@ def receiver():
 				add_table(node_info)
 				process_CAM(node_info)
 
-def generate_messageID():
-	
-	global messageID
-	messageID += 1
 
 def add_table(node_info):
 
@@ -132,28 +130,6 @@ def add_table(node_info):
 
 	finally:
 		lock.release()
-
-class myThread (threading.Thread):
-   def __init__(self, threadID):
-      threading.Thread.__init__(self)
-      self.threadID = threadID
-   def run(self):
-      threadClock()
-
-
-class ThreadReceiver (threading.Thread):
-   def __init__(self, threadID):
-      threading.Thread.__init__(self)
-      self.threadID = threadID
-   def run(self):
-      receiver()
-
-class ThreadSender (threading.Thread):
-   def __init__(self, threadID):
-      threading.Thread.__init__(self)
-      self.threadID = threadID
-   def run(self):
-      sender()
 
 def convertStringIntoDatetime(string):
 	return datetime.strptime(string, "%Y-%m-%d %H:%M:%S.%f")
@@ -187,6 +163,8 @@ def process_CAM(node_info):
 
 	filtro(node_info,pos)
 
+
+
 def filtro (node,posicao):
 
 	global semaforo_1
@@ -199,7 +177,6 @@ def filtro (node,posicao):
 
 	elif posicao in semaforo_2['zona']:
 		semaforo_2['table']=add_table_rsu(node,"semaforo_2")
-		return True
 
 	elif posicao in semaforo_3['zona']:
 		semaforo_3['table']=add_table_rsu(node,"semaforo_3")
@@ -215,8 +192,12 @@ def filtro (node,posicao):
 
 		for no in semaforo_1['table']:
 			if no['ID']==id:
-				del semaforo_1['table'][counter]
-				break
+				lock_app.acquire()
+				try:
+					del semaforo_1['table'][counter]
+				finally:
+					lock_app.release()
+				return
 
 			counter+=1
 
@@ -224,8 +205,12 @@ def filtro (node,posicao):
 
 		for no in semaforo_2['table']:
 			if no['ID']==id:
-				del semaforo_2['table'][counter]
-				break
+				lock_app.acquire()
+				try:
+					del semaforo_2['table'][counter]
+				finally:
+					lock_app.release
+				return
 
 			counter+=1
 
@@ -233,8 +218,12 @@ def filtro (node,posicao):
 
 		for no in semaforo_3['table']:
 			if no['ID']==id:
-				del semaforo_3['table'][counter]
-				break
+				lock_app.acquire()
+				try:
+					del semaforo_3['table'][counter]
+				finally:
+					lock_app.release()
+				return
 
 			counter+=1
 
@@ -242,13 +231,18 @@ def filtro (node,posicao):
 
 		for no in semaforo_4['table']:
 			if no['ID']==id:
-				del semaforo_4['table'][counter]
-				break
+				lock_app.acquire()
+				try:
+					del semaforo_4['table'][counter]
+				finally:
+					lock_app.release()
+				return
 
 			counter+=1
 
 def add_table_rsu(node_info,semaforo):
 	
+	global lock_app
 	counter = -1
 	flag_exist=False
 
@@ -261,7 +255,7 @@ def add_table_rsu(node_info,semaforo):
 	else:
 		table=semaforo_4['table']
 
-	lock.acquire()
+	lock_app.acquire()
 	try:
 		if len(table) > 0:
 			for i in table:
@@ -282,7 +276,7 @@ def add_table_rsu(node_info,semaforo):
 		#print("Tabela:" + str(table_of_nodes))
 
 	finally:
-		lock.release()
+		lock_app.release()
 
 	return table
 
@@ -300,6 +294,7 @@ def count_cars():
 
 def decide_cor():
 
+
 	global semaforo_1
 	global semaforo_2
 	global semaforo_3
@@ -310,10 +305,6 @@ def decide_cor():
 	last_vehicle=""
 	maior=max(number_of_cars,key=number_of_cars.get)
 
-	if 0 not in number_of_cars.values():
-		alterar_estado=True
-
-
 	if maior=="cars_in_1" or maior=="cars_in_2":
 
 		new_state="semaforo_1_2"
@@ -321,11 +312,11 @@ def decide_cor():
 		if maior=="cars_in_1" and len(semaforo_1['table'])!=0:
 			last_vehicle=semaforo_1['table'][-1]['ID'] #ultimo carro na zona do semaforo_1
 
-		elif maior=="cars_in_2" and len(semaforo_1['table'])!=0:
+		elif maior=="cars_in_2" and len(semaforo_2['table'])!=0:
 			last_vehicle=semaforo_2['table'][-1]['ID'] #ultimo carro na zona do semaforo_2
 		else:
 			old_state=changeState(new_state)
-			time.sleep(5)
+			time.sleep(TIME_CHANGE_WITHOUT_CARS)
 			new_state="semaforo_3_4"
 
 	
@@ -333,9 +324,9 @@ def decide_cor():
 
 		new_state="semaforo_3_4"
 
-		if maior=="cars_in_3" and len(semaforo_1['table'])!=0:
+		if maior=="cars_in_3" and len(semaforo_3['table'])!=0:
 			last_vehicle=semaforo_3['table'][-1]['ID'] #ultimo carro na zona do semaforo_3
-		elif maior=="cars_in_3"and len(semaforo_1['table'])!=0:
+		elif maior=="cars_in_3"and len(semaforo_4['table'])!=0:
 			last_vehicle=semaforo_4['table'][-1]['ID'] #ultimo carro na zona do semaforo_4
 
 	old_state=changeState(new_state)
@@ -367,7 +358,7 @@ def changeState(state):
 			gpio.output(38,gpio.HIGH)
 			gpio.output(36,gpio.LOW)
 
-			time.sleep(1)
+			time.sleep(TIME_YELLOW)
 
 			gpio.output(40,gpio.LOW)
 			gpio.output(38,gpio.LOW)
@@ -382,37 +373,68 @@ def changeState(state):
 
 def timer_semaforo(state,last_vehicle):
 
+	global lock_app
+
 	flag_last_car=True
 	if last_vehicle!="":
 		while flag_last_car==True:
 			flag_last_car= False
 			if state=="semaforo_1_2":
-				for i in semaforo_1['table']:
-					if i['ID']==last_vehicle:
-						flag_last_car=True
-						break
+				lock_app.acquire()
+				try:
+					for i in semaforo_1['table']:
+						if i['ID']==last_vehicle:
+							flag_last_car=True
+							break
 
-				for i in semaforo_2['table']:
-					if i['ID']==last_vehicle:
-						flag_last_car=True
-						break
-
+					for i in semaforo_2['table']:
+						if i['ID']==last_vehicle:
+							flag_last_car=True
+							break
+				finally:
+					lock_app.release()
 			if state=="semaforo_3_4":
-				for i in semaforo_3['table']:
-					if i['ID']==last_vehicle:
-						flag_last_car=True
-						break
+				lock_app.acquire()
+				try:
+					for i in semaforo_3['table']:
+						if i['ID']==last_vehicle:
+							flag_last_car=True
+							break
 
-				for i in semaforo_4['table']:
-					if i['ID']==last_vehicle:
-						flag_last_car=True
-						break
+					for i in semaforo_4['table']:
+						if i['ID']==last_vehicle:
+							flag_last_car=True
+							break
+				finally:
+					lock_app.release()
 
 	else:
-		time.sleep(5)
+		timecounter=ThreadTimeCounter("Thread-timeCounter")
+		timecounter.start()
+		time.sleep(TIME_CHANGE_WITHOUT_CARS+TIME_YELLOW)
 		flag_last_car==False
 
 	decide_cor()
+
+def timeCounter():
+	global counter
+	counter=TIME_CHANGE_WITHOUT_CARS+TIME_YELLOW
+	while counter>0:
+		counter-=1
+		if len(semaforo_1['table'])>0 and counter!=0:
+			coord=semaforo_1['table'][0]['Coordinates']
+			coord_x=coord[0]
+			final=8-coord_x
+			print("#######################################################################")
+			print("Velocidade recomendada: "+str(float(final)/float(counter))+" coord/s")
+			print("#######################################################################")
+		time.sleep(1)
+
+
+#-------------------------------------#
+#               Threads               #
+#-------------------------------------#
+
 
 class ThreadAlgoritmo (threading.Thread):
    def __init__(self, threadID):
@@ -420,6 +442,35 @@ class ThreadAlgoritmo (threading.Thread):
       self.threadID = threadID
    def run(self):
       decide_cor()
+
+class myThread (threading.Thread):
+   def __init__(self, threadID):
+      threading.Thread.__init__(self)
+      self.threadID = threadID
+   def run(self):
+      threadClock()
+
+
+class ThreadReceiver (threading.Thread):
+   def __init__(self, threadID):
+      threading.Thread.__init__(self)
+      self.threadID = threadID
+   def run(self):
+      receiver()
+
+class ThreadSender (threading.Thread):
+   def __init__(self, threadID):
+      threading.Thread.__init__(self)
+      self.threadID = threadID
+   def run(self):
+      sender()
+
+class ThreadTimeCounter (threading.Thread):
+	def __init__(self, threadID):
+		threading.Thread.__init__(self)
+		self.threadID = threadID
+	def run(self):
+		timeCounter()
 
 if __name__ == '__main__':
     main() 
