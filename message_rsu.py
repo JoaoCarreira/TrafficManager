@@ -2,7 +2,7 @@ import sys
 import time
 import uuid
 import threading
-from datetime import datetime
+import datetime
 import json
 import uuid
 import RPi.GPIO as gpio
@@ -19,9 +19,9 @@ lock= threading.Lock()
 lock_app= threading.Lock()
 
 semaforo_1={'table':[],'state':"red",'zona':[[4,7],[5,7],[6,7],[7,7]],'cars':0}
-semaforo_2={'table':[],'state':"red",'zona':[],'cars':0}
+semaforo_2={'table':[],'state':"red",'zona':[[10,8],[11,8],[12,8],[13,8]],'cars':0}
 semaforo_3={'table':[],'state':"red",'zona':[[9,6],[9,5],[9,4],[9,3]],'cars':0}
-semaforo_4={'table':[],'state':"red",'zona':[],'cars':0}
+semaforo_4={'table':[],'state':"red",'zona':[[8,9],[8,10],[8,11],[8,12]],'cars':0}
 
 number_of_cars={'cars_in_1':0,'cars_in_2':0,'cars_in_3':0,'cars_in_4':0}
 
@@ -64,7 +64,7 @@ def sender():
 
 		while time.time() > timeToSendMessage:
 
-			messageToSend = {'Type': 'Beacon', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.now())}
+			messageToSend = {'Type': 'Beacon', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.datetime.now())}
 			
 			#print("Message to send: " + str(messageToSend))
 
@@ -86,6 +86,7 @@ def receiver():
 	while True:
 		
 		node_info = json.loads(Communication.receiveMessage(sock))
+		node_info.update({'Received': str(datetime.datetime.now())})
 
 		if node_info['ID'] == NodeID:
 			continue
@@ -132,7 +133,7 @@ def add_table(node_info):
 		lock.release()
 
 def convertStringIntoDatetime(string):
-	return datetime.strptime(string, "%Y-%m-%d %H:%M:%S.%f")
+	return datetime.datetime.strptime(string, "%Y-%m-%d %H:%M:%S.%f")
 
 
 def threadClock():
