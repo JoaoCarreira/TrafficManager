@@ -3,11 +3,11 @@ import time
 import uuid
 import threading
 import datetime
-import cam_obu
 import json
 import uuid
 import CarController
 import Communication
+import cam_obu
 
 SLEEP_TIME = 2
 Timer=0
@@ -22,16 +22,14 @@ lock1 = threading.Lock()
 
 NodeID = 0
 
-messageID = 0
-
 table_of_nodes=[]
 
 lock= threading.Lock()
 
 def main():
 
-	global lock
 	global NodeID
+
 	NodeID = sys.argv[1]
 	print("Your node is: " + str(NodeID))
 
@@ -44,10 +42,9 @@ def main():
 	thread1 = myThread("Thread-clock")
 	thread1.start()
 
-def generateMessageId():
+def incrementMessageID(id):
 	
-	global messageID
-	messageID += 1
+	return id + 1
 
 def addToTable(node_info):
 
@@ -154,6 +151,8 @@ class ThreadSender (threading.Thread):
 #Function that is responsible for sending the messages to the network
 def sender():
 
+	messageID = 0
+
 	time_increment=False
 
 	timeToSendMessage = time.time()
@@ -169,7 +168,7 @@ def sender():
 				
 			gpsInfo=getCoordinates()
 			
-			generateMessageId()
+			messageID = incrementMessageID(messageID)
 
 			beaconMessage = {'Type': 'Beacon', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.datetime.now())}
 			
