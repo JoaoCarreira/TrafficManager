@@ -9,6 +9,20 @@ import CarController
 import Communication
 import cam_obu
 
+RASPBERRY = False
+import sys, json
+if RASPBERRY == True:
+	import RPi.GPIO as GPIO
+from time import sleep
+import time
+import threading
+
+FREQUENCY = 100
+MIN_SPEED = 0
+MAX_SPEED = 100
+MAX_FORWARD_SPEED = 60
+MAX_BACKWARD_SPEED =60
+
 SLEEP_TIME = 2
 Timer=0
 X=int(0)
@@ -35,8 +49,8 @@ def main():
 
 	threadreceiver = ThreadReceiver("Thread-receiver")
 	threadreceiver.start()
-	#threadAndar = ThreadAndar("Thread-andar")
-	#threadAndar.start()
+	threadAndar = ThreadAndar("Thread-andar")
+	threadAndar.start()
 	threadsender = ThreadSender("Thread-sender")
 	threadsender.start()
 	thread1 = myThread("Thread-clock")
@@ -227,35 +241,69 @@ def TocaAndar(x,y,co,dir):
 	global DIR
 	global Co
 
-	#X=int(float(sys.argv[1]))
-	#Y=int(float(sys.argv[2]))
 	X=x
 	Y=y
 	Co[0]=X
 	Co[1]=Y
 	
-	#DIR=sys.argv[3]
 	DIR=dir
-	#coordenadas=int(sys.argv[4])
+
 	coordenadas=co
 
 	gpio_data = {}
-	gpio_data = CarController.read_gpio_conf('gpio_pins')
+	gpio_data = read_gpio_conf('gpio_pins')
 
 	pwm_motor = {}
-	CarController.gpio_init(gpio_data, pwm_motor)
+	gpio_init(gpio_data, pwm_motor)
 
 	andar(gpio_data,int(coordenadas),pwm_motor)
 	'''Actualiza coordenadas actuais'''
-	
+	input("print enter to continue")
 	X=Co[0]
 	Y=Co[1]
-	#sleep(3)
-	#andar(gpio_data,int(coordenadas),pwm_motor)
+	andar(gpio_data,int(coordenadas),pwm_motor)
+
 	if RASPBERRY == True:
 		GPIO.cleanup()
 
 ################################
+
+def read_gpio_conf(field):
+	print('read_gpio_conf')
+	with open('gpio_pins.txt') as json_data:
+		data = json.load(json_data)
+		print('gpio_pins  data: ', data)
+		json_data.close()
+	return data[field]
+
+def gpio_init(gpio_data, pwm_motor):
+	print ('gpio_init')
+	gpio_data = read_gpio_conf('gpio_pins')
+	if RASPBERRY == True:
+	   GPIO.setmode(GPIO.BOARD)
+	print('GPIO.setmode(GPIO.BOARD)')
+	reset_gpio(gpio_data)
+	reset_pwm_motor(gpio_data, pwm_motor)
+	return (gpio_data, pwm_motor)
+
+def reset_gpio(gpio_data):
+	for key, val in list(gpio_data.items()):
+		if key != 'stop':
+			if RASPBERRY == True:
+				GPIO.setup(val,GPIO.OUT)
+				GPIO.output(val,GPIO.LOW)
+			print ('GPIO.setup(',val,',GPIO.OUT)')
+			print ('GPIO.output(',val,',GPIO.LOW)')
+
+def reset_pwm_motor(gpio_data, pwm_motor):
+	for key, val in list(gpio_data.items()):
+		if key in ('enable_dir'):
+			if RASPBERRY == True:
+				pwm_motor[key] = GPIO.PWM(val, FREQUENCY)
+				pwm_motor[key].start(MIN_SPEED)
+			print ('pwm_motor[',key,'] = GPIO.PWM(',val,',',FREQUENCY,')')
+			print ('pwm_motor[',key,'].start(',MIN_SPEED,')')
+	return pwm_motor
 
 def tempoParaAndar(coordenadas):
 	tempo=0
