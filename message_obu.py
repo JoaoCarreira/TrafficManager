@@ -44,8 +44,8 @@ def main():
 
 	threadreceiver = ThreadReceiver("Thread-receiver")
 	threadreceiver.start()
-	threadAndar = ThreadAndar("Thread-andar")
-	threadAndar.start()
+	#threadAndar = ThreadAndar("Thread-andar")
+	#threadAndar.start()
 	threadsender = ThreadSender("Thread-sender")
 	threadsender.start()
 	thread1 = myThread("Thread-clock")
@@ -60,29 +60,35 @@ def addToTable(node_info):
 
 	global table_of_nodes
 
-	counter=-1
+	counter = 0
 	flag_exist=False
 
 	lock.acquire()
 	try:
 		if len(table_of_nodes) > 0:
-
 			for i in table_of_nodes:
-				counter += 1
 				if node_info['ID']==i['ID']:
 					if convertStringIntoDatetime(node_info['Timestamp']) > convertStringIntoDatetime(i['Timestamp']):
-						print("Encontrei um com ID igual")
 						table_of_nodes[counter]=node_info
 						flag_exist=True
 						break
+					if node_info['Type'] == 'CAM' and i['Type']:
+						table_of_nodes[counter]=node_info
+						flag_exist=True
+						break
+			counter += 1
+
 
 			if flag_exist==False:
+				print("CONA")
 				table_of_nodes.append(node_info)
 				
 		else:
 			table_of_nodes.append(node_info)
 
+		print("....................................")
 		print("Tabela:" + str(table_of_nodes))
+		print("....................................")
 
 	finally:
 		lock.release()
@@ -138,8 +144,6 @@ def receiver():
 		node_info=json.loads(messageReceived)
 		node_info.update({'Received': str(datetime.datetime.now())})
 
-		print("cona")
-
 		#Filter to ignore the own messages sent
 		if node_info['ID'] == NodeID:
 			continue
@@ -151,7 +155,7 @@ def receiver():
 
 			if node_info['Type']=='CAM':
 				addToTable(node_info)
-				cam_obu.process_CAM(node_info)
+				#cam_obu.process_CAM(node_info)
 
 
 class ThreadSender (threading.Thread):
@@ -168,44 +172,65 @@ def sender():
 
 	timeToSendMessage = time.time()
 
-	while True:
+	camBuffer = []
 
-		number_of_nodes=len(table_of_nodes)
+	while True:
 
 		#If the table of neighbors is empty, then a Beacon message will be generated.
 		#Otherwise, a CA message is generated.
-		if number_of_nodes==0:
 
-			while time.time() > timeToSendMessage:
+		while time.time() > timeToSendMessage:
 				
-				
-				gpsInfo=getCoordinates()
-				
-				generateMessageId()
+			gpsInfo=getCoordinates()
+			
+			generateMessageId()
 
-				messageToSend = {'Type': 'Beacon', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.datetime.now())}
+			beaconMessage = {'Type': 'Beacon', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.datetime.now())}
+			
+			camMessage = {'Type': 'CAM', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.datetime.now())}
+
+			sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+			sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
+
+			if len(table_of_nodes) == 0:
+
+				print("Message to send: " + str(beaconMessage))
+
+				data = json.dumps(beaconMessage)
 				
-				print("Message to send: " + str(messageToSend))
-
-				data = json.dumps(messageToSend)
-
-				sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-				sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
 				sock.sendto(data.encode(), (MCAST_GRP, MCAST_PORT))
-				timeToSendMessage = time.time() + 0.5
-				#time_increment=True
 
-		else:
+				counter = 0
 
-			while time.time() > timeToSendMessage:
-				gpsInfo=getCoordinates()
-				messageToSend = {'Type': 'CAM', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.datetime.now())}
-				data = json.dumps(messageToSend)
-				print("Message to send: " + str(messageToSend))
-				sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-				sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
+				if len(camBuffer) == 0:
+					print("First message CA on buffer")
+					camBuffer.append(camMessage)
+
+				else:
+
+					for i in camBuffer:
+						if i['Type'] == 'CAM':
+							print("Updating CAM on buffer")
+							i = camMessage
+						
+						counter += 1
+
+			
+			else:
+
+				print("Message to send: " + str(beaconMessage))
+
+				for i in camBuffer:
+					if i['Type'] == 'CAM':
+						print("Sending CAM from the buffer")
+						camMessage = i
+
+				data = json.dumps(camMessage)
+				
 				sock.sendto(data.encode(), (MCAST_GRP, MCAST_PORT))
-				timeToSendMessage = time.time() + 0.5
+
+
+			timeToSendMessage = time.time() + 0.5
 				
 
 class ThreadAndar(threading.Thread):
