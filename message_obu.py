@@ -1,5 +1,3 @@
-import struct
-import socket
 import sys
 import time
 import uuid
@@ -9,9 +7,7 @@ import cam_obu
 import json
 import uuid
 import CarController
-
-MCAST_GRP = "224.0.0.1"
-MCAST_PORT = 10000
+import Communication
 
 SLEEP_TIME = 2
 Timer=0
@@ -22,7 +18,9 @@ DIR="direçao"
 EstaAndar=False
 lock1 = threading.Lock()
 
-NodeID = hex(uuid.getnode()).replace('0x', '')
+#NodeID = hex(uuid.getnode()).replace('0x', '')
+
+NodeID = 0
 
 messageID = 0
 
@@ -34,6 +32,7 @@ def main():
 
 	global lock
 	global NodeID
+	NodeID = sys.argv[1]
 	print("Your node is: " + str(NodeID))
 
 	threadreceiver = ThreadReceiver("Thread-receiver")
@@ -125,17 +124,11 @@ class ThreadReceiver (threading.Thread):
 #Function that is responsible for receiving the messages to the network
 def receiver():
 
-	sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-	sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-	sock.bind((MCAST_GRP, MCAST_PORT))
-	mreq = struct.pack("4sl", socket.inet_aton(MCAST_GRP), socket.INADDR_ANY)
-	sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+	sock = Communication.setReceiver()
  
 	while True:
 		
-		data=sock.recv(1024)
-		messageReceived=data.decode()
-		node_info=json.loads(messageReceived)
+		node_info = json.loads(Communication.receiveMessage(sock))
 		node_info.update({'Received': str(datetime.datetime.now())})
 
 		#Filter to ignore the own messages sent
@@ -183,16 +176,13 @@ def sender():
 			
 			camMessage = {'Type': 'CAM', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.datetime.now())}
 
-			sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-			sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
+			data = None
 
 			if len(table_of_nodes) == 0:
 
 				print("Message to send: " + str(beaconMessage))
 
 				data = json.dumps(beaconMessage)
-				
-				sock.sendto(data.encode(), (MCAST_GRP, MCAST_PORT))
 
 				counter = 0
 
@@ -220,10 +210,8 @@ def sender():
 						camMessage = i
 
 				data = json.dumps(camMessage)
-				
-				sock.sendto(data.encode(), (MCAST_GRP, MCAST_PORT))
 
-
+			Communication.sendMessage(data)
 			timeToSendMessage = time.time() + 0.5
 				
 

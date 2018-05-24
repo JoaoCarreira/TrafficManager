@@ -1,5 +1,3 @@
-import struct
-import socket
 import sys
 import time
 import uuid
@@ -8,9 +6,7 @@ from datetime import datetime
 import json
 import uuid
 import RPi.GPIO as gpio
-
-MCAST_GRP = "224.0.0.1"
-MCAST_PORT = 10000
+import Communication
 
 NodeID = hex(uuid.getnode()).replace('0x', '')
 
@@ -73,9 +69,7 @@ def sender():
 
 			data = json.dumps(messageToSend)
 
-			sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-			sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 32)
-			sock.sendto(data.encode(), (MCAST_GRP, MCAST_PORT))
+			Communication.sendMessage(data)
 			timeToSendMessage = time.time() + 0.5
 
 def receiver():
@@ -85,17 +79,11 @@ def receiver():
 	#thread1 = myThread("Thread-1")
 	#thread1.start()
 
-	sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-	sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-	sock.bind((MCAST_GRP, MCAST_PORT))
-	mreq = struct.pack("4sl", socket.inet_aton(MCAST_GRP), socket.INADDR_ANY)
-	sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+	sock = Communication.setReceiver()
  
 	while True:
 		
-		data=sock.recv(1024)
-		messageReceived=data.decode()
-		node_info=json.loads(messageReceived)
+		node_info = json.loads(Communication.receiveMessage(sock))
 
 		if node_info['ID'] == NodeID:
 			continue
