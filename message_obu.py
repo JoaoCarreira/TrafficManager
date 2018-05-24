@@ -3,7 +3,6 @@ import socket
 import sys
 import time
 import uuid
-#from hashlib import blake2s
 import threading
 import datetime
 import cam_obu
@@ -23,11 +22,7 @@ DIR="direçao"
 EstaAndar=False
 lock1 = threading.Lock()
 
-######################################
-#mac_addr = hex(uuid.getnode()).replace('0x', '')
-#NodeID = ':'.join(mac_addr[i : i + 2] for i in range(0, 11, 2))
-
-NodeID = 0
+NodeID = hex(uuid.getnode()).replace('0x', '')
 
 messageID = 0
 
@@ -39,13 +34,12 @@ def main():
 
 	global lock
 	global NodeID
-	NodeID = sys.argv[1]
 	print("Your node is: " + str(NodeID))
 
 	threadreceiver = ThreadReceiver("Thread-receiver")
 	threadreceiver.start()
-	#threadAndar = ThreadAndar("Thread-andar")
-	#threadAndar.start()
+	threadAndar = ThreadAndar("Thread-andar")
+	threadAndar.start()
 	threadsender = ThreadSender("Thread-sender")
 	threadsender.start()
 	thread1 = myThread("Thread-clock")

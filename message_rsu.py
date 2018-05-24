@@ -3,13 +3,11 @@ import socket
 import sys
 import time
 import uuid
-#from hashlib import blake2s
 import threading
 from datetime import datetime
 import json
 import uuid
 import RPi.GPIO as gpio
-
 
 MCAST_GRP = "224.0.0.1"
 MCAST_PORT = 10000
@@ -179,17 +177,17 @@ def threadClock():
 	while True:
 		counter = 0
 
-		#for i in table_of_nodes:
+		for i in table_of_nodes:
 
-  			#if i[4]==15:
-  			
-  				#print("TIMEOUT \nDeleting the table entry of the NodeID=" + table_of_nodes[counter][0]+ " ...")
-  				#del(table_of_nodes[counter])
-  				#continue
+			if (convertStringIntoDatetime(i['Received']) + datetime.timedelta(seconds=5)) < datetime.datetime.now():
+				
+				print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+				print("TIMEOUT \nDeleting the table entry of the NodeID=" + table_of_nodes[counter]['ID']+ " ...")
+				print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")                  
+				del(table_of_nodes[counter])
+				continue
 
-#  			table_of_nodes[counter][4] += 1 
- # 			time.sleep(1)
-  #			counter += 1
+			counter += 1
 
 #-------------------------------------#
 # Tratamento das mensagens CAM na RSU #
