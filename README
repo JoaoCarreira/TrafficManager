@@ -6,18 +6,23 @@ Elementos do grupo 6:
 	-João Correia 81990
 
 Como executar o projeto:
-	- OBU: python id valorx valory quantascoordenadasanda eixo
-		ex: tipo message_obu 1 0 0 10 x , nó com id 1 que inicia o seu movimento nas coordenas 0,0 e vai avançar 10 coordenadas no eixo do x
-	- RSU: python message_rsu.py 
+	- OBU: python3 id valorX valorY quantasCoordenadasAnda eixoEmQueAndará
+		ex: python3 message_obu 1 0 0 10 x , nó com id 1 que inicia o seu movimento nas coordenas (0,0) e percorrerá 10 coordenadas no eixo do x
+	- RSU: python3 message_rsu.py 
+
+Notas relativamente à execução do projecto:
+
+	- Salientar que existem valores presentes no código que foi necessário definir à priori por motivos da demonstração que foi realizada no dia 24/05/2018. Entre eles temos as 	regiões de interesse ou mesmo as coordenadas da RSU (sempre definidas como sendo (8,8)).
+	No entanto todos estes valores, para uma aplicação no mundo real, poderiam ser passados como argumentos das funções de modo a que fosse definido inicialmente por um 		programador.
 
 Distribuição das tarefas:
 
-Cada elementos ficou responsável por um módulo do projeto:
+Cada elementos ficou responsável por um módulo do projeto, como de seguida indicado:
 
-	-João Carreira: responsável pela implementação do algoritmo dos semáforos e pelo cálculo da velocidade e todas as funções necessárias
+	-João Carreira: responsável pela implementação do algoritmo da decisão da cor dos semáforos e pelo cálculo da velocidade recomendada (bem como de todas as funções auxiliares ao funcionamento normal das tarefas atribuidas)
 
-	-Pedro Lopes: responsável pela implementação de toda a comunicação do projeto, envio de Beacons e CA messages e todas as funções necessárias
+	-Pedro Lopes: responsável pela implementação de toda a comunicação do projeto: gerar as mensagens Beacon e CAM, tratar do seu envio e da sua recepção, adicionar às tabelas dos nós (sejam eles RSU ou OBUs) e de eliminar um nó após um dado timeout em que este não envia mensagens (bem como de todas as funções auxiliares ao funcionamento normal das tarefas atribuídas)
 
-	-João Correia: responsável pelas medições dos tempos que o carro demora a perccorer determinada distância e implementação com base das medições o sistema de coordenadas utilizado.
+	-João Correia: responsável pelas medições dos tempos que o carro demora a percorrer determinada distância e implementação, com base nessas medições, do sistema de coordenadas virtual utilizado.
 
 Embora cada elemento tenha estado responsável por um módulo, todos os elementos do grupo se envolveram nos módulos dos colegas, cooperando para uma melhor implementação e maior coesão do projeto. 
