@@ -5,33 +5,30 @@ import threading
 import datetime
 import json
 import uuid
-import CarController
 import Communication
 import cam_obu
+import CarGPIO
+import Util
 
 RASPBERRY = False
-import sys, json
 if RASPBERRY == True:
 	import RPi.GPIO as GPIO
-from time import sleep
-import time
-import threading
 
-FREQUENCY = 100
-MIN_SPEED = 0
-MAX_SPEED = 100
 MAX_FORWARD_SPEED = 60
-MAX_BACKWARD_SPEED =60
+MAX_BACKWARD_SPEED = 60
 
 SLEEP_TIME = 2
-Timer=0
-X=int(0)
-Y=int(0)
-Co=[X,Y]
-DIR="direçao"
+Timer = 0
+X = int(0)
+Y = int(0)
+Co = [X,Y]
+DIR = ""
 EstaAndar=False
 lock1 = threading.Lock()
 
+#To be able to run the program in the same machine, we can't have all the ids of the nodes being 
+#dependent on the MAC address.
+#In case the various OBUs and RSU are run in different machines, just uncomment the following line.
 #NodeID = hex(uuid.getnode()).replace('0x', '')
 
 NodeID = 0
@@ -42,64 +39,23 @@ lock= threading.Lock()
 
 def main():
 
-	global NodeID
-
-	NodeID = sys.argv[1]
-	print("Your node is: " + str(NodeID))
-
 	threadreceiver = ThreadReceiver("Thread-receiver")
 	threadreceiver.start()
-	threadAndar = ThreadAndar("Thread-andar")
+	threadAndar = Threadmove("Thread-andar")
 	threadAndar.start()
 	threadsender = ThreadSender("Thread-sender")
 	threadsender.start()
-	thread1 = myThread("Thread-clock")
+	thread1 = ThreadClock("Thread-clock")
 	thread1.start()
 
+#Fucntion used to increment the message id number
 def incrementMessageID(id):
 	
 	return id + 1
-
-def addToTable(node_info):
-
-	global table_of_nodes
-
-	counter = 0
-	flag_exist=False
-
-	lock.acquire()
-	try:
-		if len(table_of_nodes) > 0:
-			for i in table_of_nodes:
-				if node_info['ID']==i['ID']:
-					if node_info['Type'] == 'CAM' and i['Type'] == 'Beacon':
-						table_of_nodes[counter]=node_info
-						flag_exist=True
-						break
-					if convertStringIntoDatetime(node_info['Timestamp']) > convertStringIntoDatetime(i['Timestamp']):
-						table_of_nodes[counter]=node_info
-						flag_exist=True
-						break
-				counter += 1
-
-
-			if flag_exist==False:
-				table_of_nodes.append(node_info)
-				
-		else:
-			table_of_nodes.append(node_info)
-
-		print("....................................")
-		print("Tabela:" + str(table_of_nodes))
-		print("....................................")
-
-	finally:
-		lock.release()
-
-def convertStringIntoDatetime(string):
-	return datetime.datetime.strptime(string, "%Y-%m-%d %H:%M:%S.%f")
-
-class myThread (threading.Thread):
+########################################################################################
+# Thread that is responsible of checkig if a node present on a table should be removed #
+########################################################################################
+class ThreadClock (threading.Thread):
 	def __init__(self, threadID):
 		threading.Thread.__init__(self)
 		self.threadID = threadID
@@ -112,84 +68,99 @@ def threadClock():
 	while True:
 		counter = 0
 
+		#Iterate over the table of nodes
 		for i in table_of_nodes:
-
-			if (convertStringIntoDatetime(i['Received']) + datetime.timedelta(seconds=10)) < datetime.datetime.now():
+			#If an entry of the table has been sitting there without any update for more than 10 seconds, 
+			# the node is considered to be inactive and its entry is removed from the table
+			if (Util.convertStringIntoDatetime(i['Received']) + datetime.timedelta(seconds=10)) < datetime.datetime.now():
 
 				print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-				print("TIMEOUT \nDeleting the table entry of the NodeID=" + table_of_nodes[counter]['ID']+ " ...")
+				print("TIMEOUT \nDeleting the table entry of the NodeID = " + table_of_nodes[counter]['ID']+ " ...")
 				print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")                  
 				del(table_of_nodes[counter])
 				continue
 
 			counter += 1
-
+#######################################################################
+# Thread that is responsible of receiveng the messages of the network #
+#######################################################################
 class ThreadReceiver (threading.Thread):
 	def __init__(self, threadID):
 		threading.Thread.__init__(self)
 		self.threadID = threadID
 	def run(self):
-		receiver()
+		receiver(sys.argv[1])
 
-#Function that is responsible for receiving the messages to the network
-def receiver():
+def receiver(NodeID):
+
+	global table_of_nodes
 
 	sock = Communication.setReceiver()
  
 	while True:
 		
 		node_info = json.loads(Communication.receiveMessage(sock))
+
+		#When a message is received, a field is added to it indicating the 
+		#timestamp of when the message was received
 		node_info.update({'Received': str(datetime.datetime.now())})
 
-		#Filter to ignore the own messages sent
+		#Ignore the own messages sent
 		if node_info['ID'] == NodeID:
 			continue
 
 		else:
+			lock.acquire()
 			print("Received the following message: \n" + str(node_info))
 			if node_info['Type']=='Beacon':
-				addToTable(node_info)
+				try:
+					table_of_nodes = Util.addToTable(node_info, table_of_nodes, 0)
+				finally:
+					lock.release()
 
 			if node_info['Type']=='CAM':
-				addToTable(node_info)
-				#cam_obu.process_CAM(node_info)
-
-
+				try:
+					table_of_nodes = Util.addToTable(node_info, table_of_nodes, 0)
+				finally: 
+					lock.release()
+#####################################################################
+# Thread that is responsible of sending the messages to the network #
+#####################################################################
 class ThreadSender (threading.Thread):
 	def __init__(self, threadID):
 		threading.Thread.__init__(self)
 		self.threadID = threadID
 	def run(self):
-		sender()
+		sender(sys.argv[1])
 
-#Function that is responsible for sending the messages to the network
-def sender():
+def sender(NodeID):
 
 	messageID = 0
-
-	time_increment=False
 
 	timeToSendMessage = time.time()
 
 	camBuffer = []
 
+	print("Your node is: " + str(NodeID))
+
 	while True:
 
-		#If the table of neighbors is empty, then a Beacon message will be generated.
-		#Otherwise, a CA message is generated.
-
+		#Both the Beacon and CA messages are generated at the same time.
 		while time.time() > timeToSendMessage:
 				
 			gpsInfo=getCoordinates()
 			
 			messageID = incrementMessageID(messageID)
 
-			beaconMessage = {'Type': 'Beacon', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.datetime.now())}
+			timeGenerated = datetime.datetime.now()
+
+			beaconMessage = {'Type': 'Beacon', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(timeGenerated)}
 			
-			camMessage = {'Type': 'CAM', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.datetime.now())}
+			camMessage = cam_obu.generateCamMessage(NodeID, gpsInfo, messageID)
 
 			data = None
 
+			#If the table of neighbors is empty, then it is the Beacon message that is sent.
 			if len(table_of_nodes) == 0:
 
 				print("Message to send: " + str(beaconMessage))
@@ -198,20 +169,21 @@ def sender():
 
 				counter = 0
 
+				#If the buffer of CA messages is empty, then the generated CA message is saved there.
 				if len(camBuffer) == 0:
-					print("First message CA on buffer")
+					print("First CA message on buffer")
 					camBuffer.append(camMessage)
 
+				#If the buffer of CA messages is not empty, then the one that is there is replaced by the newly generated.
 				else:
-
 					for i in camBuffer:
 						if i['Type'] == 'CAM':
-							print("Updating CAM on buffer")
+							print("Updating CA message on buffer")
 							i = camMessage
 						
 						counter += 1
 
-			
+			#If the table of neighbors is not empty, then it is the CA message present in the buffer that is sent.
 			else:
 
 				print("Message to send: " + str(beaconMessage))
@@ -220,6 +192,7 @@ def sender():
 					if i['Type'] == 'CAM':
 						print("Sending CAM from the buffer")
 						camMessage = i
+						#When the CA message in the buffer is sent, it is removed from there.
 						camBuffer.remove(i)
 
 				data = json.dumps(camMessage)
@@ -227,15 +200,18 @@ def sender():
 			Communication.sendMessage(data)
 			timeToSendMessage = time.time() + 0.5
 				
+################################################
+# Thread that is responsible of moving the car #
+################################################
 
-class ThreadAndar(threading.Thread):
+class Threadmove(threading.Thread):
 	def __init__(self, threadID):
 		threading.Thread.__init__(self)
 		self.threadID = threadID
 	def run(self):
-		TocaAndar(int(float(sys.argv[2])),int(float(sys.argv[3])),int(float(sys.argv[4])),sys.argv[5])
+		moveCar(int(float(sys.argv[2])),int(float(sys.argv[3])),int(float(sys.argv[4])),sys.argv[5])
 
-def TocaAndar(x,y,co,dir):
+def moveCar(x,y,co,dir):
 	global X
 	global Y
 	global DIR
@@ -248,82 +224,47 @@ def TocaAndar(x,y,co,dir):
 	
 	DIR=dir
 
-	coordenadas=co
+	coordinates=co
 
 	gpio_data = {}
-	gpio_data = read_gpio_conf('gpio_pins')
+	gpio_data = CarGPIO.read_gpio_conf('gpio_pins')
 
 	pwm_motor = {}
-	gpio_init(gpio_data, pwm_motor)
+	CarGPIO.gpio_init(gpio_data, pwm_motor, RASPBERRY)
 
-	andar(gpio_data,int(coordenadas),pwm_motor)
-	'''Actualiza coordenadas actuais'''
-	input("print enter to continue")
+	move(gpio_data,int(coordinates),pwm_motor)
+	input("press enter to move again")
 	X=Co[0]
 	Y=Co[1]
-	andar(gpio_data,int(coordenadas),pwm_motor)
+	move(gpio_data,int(coordinates),pwm_motor)
 
 	if RASPBERRY == True:
 		GPIO.cleanup()
 
-################################
-
-def read_gpio_conf(field):
-	print('read_gpio_conf')
-	with open('gpio_pins.txt') as json_data:
-		data = json.load(json_data)
-		print('gpio_pins  data: ', data)
-		json_data.close()
-	return data[field]
-
-def gpio_init(gpio_data, pwm_motor):
-	print ('gpio_init')
-	gpio_data = read_gpio_conf('gpio_pins')
-	if RASPBERRY == True:
-	   GPIO.setmode(GPIO.BOARD)
-	print('GPIO.setmode(GPIO.BOARD)')
-	reset_gpio(gpio_data)
-	reset_pwm_motor(gpio_data, pwm_motor)
-	return (gpio_data, pwm_motor)
-
-def reset_gpio(gpio_data):
-	for key, val in list(gpio_data.items()):
-		if key != 'stop':
-			if RASPBERRY == True:
-				GPIO.setup(val,GPIO.OUT)
-				GPIO.output(val,GPIO.LOW)
-			print ('GPIO.setup(',val,',GPIO.OUT)')
-			print ('GPIO.output(',val,',GPIO.LOW)')
-
-def reset_pwm_motor(gpio_data, pwm_motor):
-	for key, val in list(gpio_data.items()):
-		if key in ('enable_dir'):
-			if RASPBERRY == True:
-				pwm_motor[key] = GPIO.PWM(val, FREQUENCY)
-				pwm_motor[key].start(MIN_SPEED)
-			print ('pwm_motor[',key,'] = GPIO.PWM(',val,',',FREQUENCY,')')
-			print ('pwm_motor[',key,'].start(',MIN_SPEED,')')
-	return pwm_motor
-
-def tempoParaAndar(coordenadas):
+#Fucntion that is responible for, given the number of coordinates that we want the car to move, 
+#calculate the time that that movement will take.
+#After measurements were made, there are values, in time, well defined for the movement of until 5 coordinates.
+#After those 5 coordinates, the time that the car took to move, was constant.
+def timeToMove(coordinates):
 	tempo=0
 
-	if coordenadas == 1:
+	if coordinates == 1:
 		tempo=1.185
-	elif coordenadas == 2:
+	elif coordinates == 2:
 		tempo=1.76
-	elif coordenadas == 3:
+	elif coordinates == 3:
 		tempo=2.062
-	elif coordenadas == 4:
+	elif coordinates == 4:
 		tempo=2.584
-	elif coordenadas == 5:
+	elif coordinates == 5:
 		tempo=2.964
-	elif coordenadas>5:
-		tempo=(coordenadas-5)*0.4 + 2.964
+	elif coordinates>5:
+		#Formula for moving more than 5 coordinates.
+		tempo=(coordinates-5)*0.4 + 2.964
 	
 	return tempo
 
-def andar(gpio_data,coordenadas,pwm_motor):
+def move(gpio_data,coordinates,pwm_motor):
 
 	global Timer
 	global EstaAndar
@@ -334,16 +275,15 @@ def andar(gpio_data,coordenadas,pwm_motor):
 		GPIO.output(gpio_data['backward_dir'], GPIO.LOW)
 		GPIO.output(gpio_data['enable_dir'], GPIO.HIGH)
 		
-	
 		EstaAndar=True
 		
 		Timer=time.time()
-		sleep (tempoParaAndar(coordenadas))
+		time.sleep (timeToMove(coordinates))
 		pwm_motor['enable_dir'].ChangeDutyCycle(MAX_BACKWARD_SPEED)
 		GPIO.output(gpio_data['backward_dir'], GPIO.LOW)
 		GPIO.output(gpio_data['forward_dir'], GPIO.LOW)
 		GPIO.output(gpio_data['enable_dir'], GPIO.HIGH)
-		sleep(0.5)
+		time.sleep(0.5)
 		EstaAndar=False
 	
 	if RASPBERRY == False:
@@ -354,17 +294,13 @@ def andar(gpio_data,coordenadas,pwm_motor):
 		finally:
 			lock1.release()
 
-		print("Comecei a andar")
-		sleep (tempoParaAndar(coordenadas))
+		time.sleep(timeToMove(coordinates))
 	
 		lock1.acquire()
 		try:
 			EstaAndar=False
 		finally:
 			lock1.release()
-
-		print("Parei de andar")
-
 
 def getCoordinates():
 	global Timer
@@ -395,7 +331,6 @@ def getCoordinates():
 			if DIR=="x":
 				a=coordenada+X
 				Co[0]=a
-
 			if DIR == "y":
 				b=coordenada+Y
 				Co[1]=b
