@@ -5,7 +5,14 @@ import threading
 import datetime
 import json
 import uuid
-#import RPi.GPIO as gpio
+RASPBERRY=False
+if RASPBERRY == True:
+	import RPi.GPIO as GPIO
+	gpio.setmode(gpio.BOARD)
+	gpio.setwarnings(False)
+	gpio.setup(38,gpio.OUT)
+	gpio.setup(40,gpio.OUT)
+	gpio.setup(36,gpio.OUT)
 import Communication
 import Util
 
@@ -332,9 +339,10 @@ def changeState(state):
 	if state!=old_state:
 		if state=="trafficLight_1_2":
 
-			#gpio.output(40,gpio.HIGH)
-			#gpio.output(38,gpio.LOW)
-			#gpio.output(36,gpio.LOW)
+			if RASPBERRY==True:
+				gpio.output(40,gpio.HIGH)
+				gpio.output(38,gpio.LOW)
+				gpio.output(36,gpio.LOW)
 
 			trafficLight_1['state']="green"
 			trafficLight_2['state']="green"
@@ -343,15 +351,16 @@ def changeState(state):
 
 		elif state=="trafficLight_3_4":
 
-			#gpio.output(40,gpio.LOW)
-			#gpio.output(38,gpio.HIGH)
-			#gpio.output(36,gpio.LOW)
+			if RASPBERRY==True:
+				gpio.output(40,gpio.LOW)
+				gpio.output(38,gpio.HIGH)
+				gpio.output(36,gpio.LOW)
 
-			time.sleep(TIME_YELLOW)
+				time.sleep(TIME_YELLOW)
 
-			#gpio.output(40,gpio.LOW)
-			#gpio.output(38,gpio.LOW)
-			#gpio.output(36,gpio.HIGH)
+				gpio.output(40,gpio.LOW)
+				gpio.output(38,gpio.LOW)
+				gpio.output(36,gpio.HIGH)
 
 			trafficLight_1['state']="red"
 			trafficLight_2['state']="red"
