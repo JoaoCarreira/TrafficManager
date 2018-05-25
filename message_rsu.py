@@ -5,8 +5,17 @@ import threading
 import datetime
 import json
 import uuid
-import RPi.GPIO as gpio
 import Communication
+
+RASPBERRY=False
+
+if RASPBERRY == True:
+	import RPi.GPIO as GPIO
+	gpio.setmode(gpio.BOARD)
+	gpio.setwarnings(False)
+	gpio.setup(38,gpio.OUT)
+	gpio.setup(40,gpio.OUT)
+	gpio.setup(36,gpio.OUT)
 
 TIME_CHANGE_WITHOUT_CARS=10
 TIME_YELLOW=1
@@ -26,12 +35,6 @@ semaforo_4={'table':[],'state':"red",'zona':[[8,9],[8,10],[8,11],[8,12]],'cars':
 number_of_cars={'cars_in_1':0,'cars_in_2':0,'cars_in_3':0,'cars_in_4':0}
 
 old_state=""
-
-gpio.setmode(gpio.BOARD)
-gpio.setwarnings(False)
-gpio.setup(38,gpio.OUT)
-gpio.setup(40,gpio.OUT)
-gpio.setup(36,gpio.OUT)
 
 
 def main():
@@ -344,9 +347,10 @@ def changeState(state):
 	if state!=old_state:
 		if state=="semaforo_1_2":
 
-			gpio.output(40,gpio.HIGH)
-			gpio.output(38,gpio.LOW)
-			gpio.output(36,gpio.LOW)
+			if RASPBERRY==True:
+				gpio.output(40,gpio.HIGH)
+				gpio.output(38,gpio.LOW)
+				gpio.output(36,gpio.LOW)
 
 			semaforo_1['state']="green"
 			semaforo_2['state']="green"
@@ -355,15 +359,16 @@ def changeState(state):
 
 		elif state=="semaforo_3_4":
 
-			gpio.output(40,gpio.LOW)
-			gpio.output(38,gpio.HIGH)
-			gpio.output(36,gpio.LOW)
+			if RASPBERRY==True:
+				gpio.output(40,gpio.LOW)
+				gpio.output(38,gpio.HIGH)
+				gpio.output(36,gpio.LOW)
 
-			time.sleep(TIME_YELLOW)
+				time.sleep(TIME_YELLOW)
 
-			gpio.output(40,gpio.LOW)
-			gpio.output(38,gpio.LOW)
-			gpio.output(36,gpio.HIGH)
+				gpio.output(40,gpio.LOW)
+				gpio.output(38,gpio.LOW)
+				gpio.output(36,gpio.HIGH)
 
 			semaforo_1['state']="red"
 			semaforo_2['state']="red"
