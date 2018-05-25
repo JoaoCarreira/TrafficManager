@@ -27,6 +27,7 @@ lock= threading.Lock()
 lock_app= threading.Lock()
 
 #Dictionary for every traffic light
+#Attention: the values forced inside the ROI field are only for testing purposes
 trafficLight_1={'table':[],'state':"red",'ROI':[[4,7],[5,7],[6,7],[7,7]],'cars':0}
 trafficLight_2={'table':[],'state':"red",'ROI':[[10,8],[11,8],[12,8],[13,8]],'cars':0}
 trafficLight_3={'table':[],'state':"red",'ROI':[[9,6],[9,5],[9,4],[9,3]],'cars':0}
@@ -38,13 +39,6 @@ old_state=""
 
 #Fixed coordinates of the RSU
 gpsInfo= [8,8]
-
-#Used to the breadboard and leds
-#gpio.setmode(gpio.BOARD)
-#gpio.setwarnings(False)
-#gpio.setup(38,gpio.OUT)
-#gpio.setup(40,gpio.OUT)
-#gpio.setup(36,gpio.OUT)
 
 def main():
 
@@ -333,7 +327,7 @@ def decideColor():
 
 	timer_trafficLight(new_state,last_vehicle)
 
-#Function used to change the state of a pair of traffic lights
+#Function used to change the state of a pair of traffic lights and light up the LEDS as wanted
 def changeState(state):
 
 	if state!=old_state:
@@ -421,6 +415,8 @@ class ThreadTimeCounter (threading.Thread):
 	def run(self):
 		timeCounter()
 
+#The formula used to the was:
+#(Distance in coordinates)/(time remaining for the LED to turn from red to gree in seconds)
 def timeCounter():
 	global counter
 	counter = TIME_CHANGE_WITHOUT_CARS + TIME_YELLOW
@@ -431,7 +427,7 @@ def timeCounter():
 			coord_x=coord[0]
 			final=8-coord_x
 			print("#######################################################################")
-			print("Velocidade recomendada: "+str(float(final)/float(counter))+" coord/s")
+			print("Recommended velociry: "+str(float(final)/float(counter))+" coord/s")
 			print("#######################################################################")
 		time.sleep(1)
 
