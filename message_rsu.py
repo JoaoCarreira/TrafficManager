@@ -5,17 +5,9 @@ import threading
 import datetime
 import json
 import uuid
+#import RPi.GPIO as gpio
 import Communication
-
-RASPBERRY=False
-
-if RASPBERRY == True:
-	import RPi.GPIO as GPIO
-	gpio.setmode(gpio.BOARD)
-	gpio.setwarnings(False)
-	gpio.setup(38,gpio.OUT)
-	gpio.setup(40,gpio.OUT)
-	gpio.setup(36,gpio.OUT)
+import Util
 
 TIME_CHANGE_WITHOUT_CARS=10
 TIME_YELLOW=1
@@ -27,36 +19,52 @@ table_of_nodes=[]
 lock= threading.Lock()
 lock_app= threading.Lock()
 
-semaforo_1={'table':[],'state':"red",'zona':[[4,7],[5,7],[6,7],[7,7]],'cars':0}
-semaforo_2={'table':[],'state':"red",'zona':[[10,8],[11,8],[12,8],[13,8]],'cars':0}
-semaforo_3={'table':[],'state':"red",'zona':[[9,6],[9,5],[9,4],[9,3]],'cars':0}
-semaforo_4={'table':[],'state':"red",'zona':[[8,9],[8,10],[8,11],[8,12]],'cars':0}
+#Dictionary for every traffic light
+trafficLight_1={'table':[],'state':"red",'ROI':[[4,7],[5,7],[6,7],[7,7]],'cars':0}
+trafficLight_2={'table':[],'state':"red",'ROI':[[10,8],[11,8],[12,8],[13,8]],'cars':0}
+trafficLight_3={'table':[],'state':"red",'ROI':[[9,6],[9,5],[9,4],[9,3]],'cars':0}
+trafficLight_4={'table':[],'state':"red",'ROI':[[8,9],[8,10],[8,11],[8,12]],'cars':0}
 
 number_of_cars={'cars_in_1':0,'cars_in_2':0,'cars_in_3':0,'cars_in_4':0}
 
 old_state=""
 
+#Fixed coordinates of the RSU
+gpsInfo= [8,8]
+
+#Used to the breadboard and leds
+#gpio.setmode(gpio.BOARD)
+#gpio.setwarnings(False)
+#gpio.setup(38,gpio.OUT)
+#gpio.setup(40,gpio.OUT)
+#gpio.setup(36,gpio.OUT)
 
 def main():
 
-	global lock
-
 	print("Your node is: " + str(NodeID))
 
-	threadsender = ThreadSender("Thread-sender")
-	threadsender.start()
-
-	threadreceiver = ThreadReceiver("Thread-receiver")
-	threadreceiver.start()
-
-	threadalgoritmo=ThreadAlgoritmo("Thread-algoritmo")
-	threadalgoritmo.start()
-
+	threadSender = ThreadSender("Thread-sender")
+	threadSender.start()
+	threadReceiver = ThreadReceiver("Thread-receiver")
+	threadReceiver.start()
+	threadAlgorithm=ThreadAlgorithm("Thread-algorithm")
+	threadAlgorithm.start()
+	thread1 = ThreadClock("Thread-1")
+	thread1.start()
+#####################################################################
+# Thread that is responsible of sending the messages to the network #
+#####################################################################
+class ThreadSender (threading.Thread):
+   def __init__(self, threadID):
+      threading.Thread.__init__(self)
+      self.threadID = threadID
+   def run(self):
+      sender()
 
 def sender():
 
-	gpsInfo= [8,8]
 	timeToSendMessage = time.time() +0.5
+
 	while True:
 
 		lock.acquire()
@@ -68,86 +76,74 @@ def sender():
 		while time.time() > timeToSendMessage:
 
 			messageToSend = {'Type': 'Beacon', 'ID': NodeID, 'Coordinates': gpsInfo, 'Timestamp': str(datetime.datetime.now())}
-			
-			#print("Message to send: " + str(messageToSend))
-
+		
 			data = json.dumps(messageToSend)
 
 			Communication.sendMessage(data)
 			timeToSendMessage = time.time() + 0.5
 
+#######################################################################
+# Thread that is responsible of receiveng the messages of the network #
+#######################################################################
+class ThreadReceiver (threading.Thread):
+   def __init__(self, threadID):
+      threading.Thread.__init__(self)
+      self.threadID = threadID
+   def run(self):
+      receiver()
+
 def receiver():
 
 	global table_of_nodes
-
-
-	thread1 = myThread("Thread-1")
-	thread1.start()
 
 	sock = Communication.setReceiver()
  
 	while True:
 		
 		node_info = json.loads(Communication.receiveMessage(sock))
+		#When a message is received, a field is added to it indicating the 
+		#timestamp of when the message was received
 		node_info.update({'Received': str(datetime.datetime.now())})
 
+		#Ignore the own messages sent
 		if node_info['ID'] == NodeID:
 			continue
 
 		else:
-			#print("Received the following message: \n" + str(json.loads(messageReceived)))
+			lock.acquire()
 			if node_info['Type']=='Beacon':
-				add_table(node_info)
+				try:
+					table_of_nodes = Util.addToTable(node_info, table_of_nodes, 1)
+				finally:
+					lock.release()
 
 			if node_info['Type']=='CAM':
-				add_table(node_info)
+				try:
+					table_of_nodes = Util.addToTable(node_info, table_of_nodes, 1)
+				finally:
+					lock.release()
 				process_CAM(node_info)
 
-
-def add_table(node_info):
-
-	global table_of_nodes
-
-	counter=-1
-	flag_exist=False
-
-	lock.acquire()
-	try:
-		if len(table_of_nodes) > 0:
-
-			for i in table_of_nodes:
-				counter += 1
-				if node_info['ID']==i['ID']:
-					if convertStringIntoDatetime(node_info['Timestamp']) > convertStringIntoDatetime(i['Timestamp']):
-						#print("Encontrei um com ID igual")
-						table_of_nodes[counter]=node_info
-						flag_exist=True
-						break
-
-			if flag_exist==False:
-				table_of_nodes.append(node_info)
-				
-		else:
-			table_of_nodes.append(node_info)
-
-		#print("Tabela:" + str(table_of_nodes))
-
-	finally:
-		lock.release()
-
-def convertStringIntoDatetime(string):
-	return datetime.datetime.strptime(string, "%Y-%m-%d %H:%M:%S.%f")
-
+########################################################################################
+# Thread that is responsible of checkig if a node present on a table should be removed #
+########################################################################################
+class ThreadClock (threading.Thread):
+   def __init__(self, threadID):
+      threading.Thread.__init__(self)
+      self.threadID = threadID
+   def run(self):
+      threadClock()
 
 def threadClock():
 	global table_of_nodes
 
 	while True:
 		counter = 0
-
+		#Iterate over the table of nodes
 		for i in table_of_nodes:
-
-			if (convertStringIntoDatetime(i['Received']) + datetime.timedelta(seconds=5)) < datetime.datetime.now():
+			#If an entry of the table has been sitting there without any update for more than 10 seconds, 
+			# the node is considered to be inactive and its entry is removed from the table
+			if (Util.convertStringIntoDatetime(i['Received']) + datetime.timedelta(seconds=10)) < datetime.datetime.now():
 				
 				print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 				print("TIMEOUT \nDeleting the table entry of the NodeID=" + table_of_nodes[counter]['ID']+ " ...")
@@ -157,48 +153,45 @@ def threadClock():
 
 			counter += 1
 
-#-------------------------------------#
-# Tratamento das mensagens CAM na RSU #
-#-------------------------------------#
-
 def process_CAM(node_info):
 
 	pos=node_info['Coordinates']
 
 	filtro(node_info,pos)
 
-
-
+#Function used to filter messages that are outside of the ROI of every traffic light
 def filtro (node,posicao):
 
-	global semaforo_1
-	global semaforo_2
-	global semaforo_3
-	global semaforo_4
+	global trafficLight_1
+	global trafficLight_2
+	global trafficLight_3
+	global trafficLight_4
 
-	if posicao in semaforo_1['zona']:
-		semaforo_1['table']=add_table_rsu(node,"semaforo_1")
+	#In case the received message is inside of the ROI of one traffic light, add that to the number of cars in it
+	if posicao in trafficLight_1['ROI']:
+		trafficLight_1['table']=addTrafficLightTable(node,"trafficLight_1")
 
-	elif posicao in semaforo_2['zona']:
-		semaforo_2['table']=add_table_rsu(node,"semaforo_2")
+	elif posicao in trafficLight_2['ROI']:
+		trafficLight_2['table']=addTrafficLightTable(node,"trafficLight_2")
 
-	elif posicao in semaforo_3['zona']:
-		semaforo_3['table']=add_table_rsu(node,"semaforo_3")
+	elif posicao in trafficLight_3['ROI']:
+		trafficLight_3['table']=addTrafficLightTable(node,"trafficLight_3")
 
-	elif posicao in semaforo_4['zona']:
-		semaforo_4['table']=add_table_rsu(node,"semaforo_4")
+	elif posicao in trafficLight_4['ROI']:
+		trafficLight_4['table']=addTrafficLightTable(node,"trafficLight_4")
 
+	#If the received message is outside the ROI but that node is in the table of any of the traffic lights, 
+	# we have to remove it, since it is already out of the ROI
 	else:
-		print("fora da zona de interesse")
+		print("Out of the ROI")
 
 		counter=0
-		id=node['ID']
-
-		for no in semaforo_1['table']:
-			if no['ID']==id:
+		#Iterate over the trafficLight_1 table and remove if the node was there
+		for no in trafficLight_1['table']:
+			if no['ID'] == node['ID']:
 				lock_app.acquire()
 				try:
-					del semaforo_1['table'][counter]
+					del trafficLight_1['table'][counter]
 				finally:
 					lock_app.release()
 				return
@@ -206,12 +199,12 @@ def filtro (node,posicao):
 			counter+=1
 
 		counter=0
-
-		for no in semaforo_2['table']:
-			if no['ID']==id:
+		#Iterate over the trafficLight_2 table and remove if the node was there
+		for no in trafficLight_2['table']:
+			if no['ID'] == node['ID']:
 				lock_app.acquire()
 				try:
-					del semaforo_2['table'][counter]
+					del trafficLight_2['table'][counter]
 				finally:
 					lock_app.release
 				return
@@ -219,12 +212,12 @@ def filtro (node,posicao):
 			counter+=1
 
 		counter=0
-
-		for no in semaforo_3['table']:
-			if no['ID']==id:
+		#Iterate over the trafficLight_3 table and remove if the node was there
+		for no in trafficLight_3['table']:
+			if no['ID'] == node['ID']:
 				lock_app.acquire()
 				try:
-					del semaforo_3['table'][counter]
+					del trafficLight_3['table'][counter]
 				finally:
 					lock_app.release()
 				return
@@ -232,182 +225,170 @@ def filtro (node,posicao):
 			counter+=1
 
 		counter=0
-
-		for no in semaforo_4['table']:
-			if no['ID']==id:
+		#Iterate over the trafficLight_4 table and remove if the node was there
+		for no in trafficLight_4['table']:
+			if no['ID'] == node['ID']:
 				lock_app.acquire()
 				try:
-					del semaforo_4['table'][counter]
+					del trafficLight_4['table'][counter]
 				finally:
 					lock_app.release()
 				return
 
 			counter+=1
 
-def add_table_rsu(node_info,semaforo):
-	
-	global lock_app
-	counter = -1
-	flag_exist=False
+#Function used to add a node to a specific traffic light table
+def addTrafficLightTable(node_info,trafficLight):
 
-	if semaforo=="semaforo_1":
-		table=semaforo_1['table']
-	elif semaforo=="semaforo_2":
-		table=semaforo_2['table']
-	elif semaforo=="semaforo_3":
-		table=semaforo_3['table']
+	if trafficLight=="trafficLight_1":
+		table=trafficLight_1['table']
+	elif trafficLight=="trafficLight_2":
+		table=trafficLight_2['table']
+	elif trafficLight=="trafficLight_3":
+		table=trafficLight_3['table']
 	else:
-		table=semaforo_4['table']
+		table=trafficLight_4['table']
 
 	lock_app.acquire()
 	try:
-		if len(table) > 0:
-			for i in table:
-				counter += 1
-				if node_info['ID']==i['ID']:
-					if convertStringIntoDatetime(node_info['Timestamp']) > convertStringIntoDatetime(i['Timestamp']):
-						#print("Encontrei um com ID igual")
-						table[counter]=node_info
-						flag_exist=True
-						break
-
-			if flag_exist==False:
-				table.append(node_info)
-				
-		else:
-			table.append(node_info)
-
-		#print("Tabela:" + str(table_of_nodes))
-
+		table = Util.addToTable(node_info, table, 1)
 	finally:
 		lock_app.release()
 
 	return table
 
-def count_cars():
+#Function used to count the number of cars in each traffic light
+def countCars():
 
 	global number_of_cars
 
-	number_of_cars['cars_in_1']=len(semaforo_1['table'])
-	number_of_cars['cars_in_2']=len(semaforo_2['table'])
-	number_of_cars['cars_in_3']=len(semaforo_3['table'])
-	number_of_cars['cars_in_4']=len(semaforo_4['table'])
+	number_of_cars['cars_in_1']=len(trafficLight_1['table'])
+	number_of_cars['cars_in_2']=len(trafficLight_2['table'])
+	number_of_cars['cars_in_3']=len(trafficLight_3['table'])
+	number_of_cars['cars_in_4']=len(trafficLight_4['table'])
 
 	print(number_of_cars)
+###########################################################################################
+# Thread that is responsible of running the algorithm to manage the traffic lights colors #
+###########################################################################################
+class ThreadAlgorithm (threading.Thread):
+   def __init__(self, threadID):
+      threading.Thread.__init__(self)
+      self.threadID = threadID
+   def run(self):
+      decideColor()
 
+def decideColor():
 
-def decide_cor():
-
-
-	global semaforo_1
-	global semaforo_2
-	global semaforo_3
-	global semaforo_4
+	global trafficLight_1
+	global trafficLight_2
+	global trafficLight_3
+	global trafficLight_4
 	global old_state
 
-	count_cars()
+	countCars()
 	last_vehicle=""
-	maior=max(number_of_cars,key=number_of_cars.get)
+	mostCars=max(number_of_cars,key=number_of_cars.get)
 
-	if maior=="cars_in_1" or maior=="cars_in_2":
+	#Case either the traffic light 1 or 2 have the most cars in it
+	if mostCars=="cars_in_1" or mostCars=="cars_in_2":
 
-		new_state="semaforo_1_2"
+		new_state="trafficLight_1_2"
 
-		if maior=="cars_in_1" and len(semaforo_1['table'])!=0:
-			last_vehicle=semaforo_1['table'][-1]['ID'] #ultimo carro na zona do semaforo_1
+		if mostCars=="cars_in_1" and len(trafficLight_1['table'])!=0:
+			#Chose the last car to the trafficLight_1
+			last_vehicle=trafficLight_1['table'][-1]['ID']
 
-		elif maior=="cars_in_2" and len(semaforo_2['table'])!=0:
-			last_vehicle=semaforo_2['table'][-1]['ID'] #ultimo carro na zona do semaforo_2
+		elif mostCars=="cars_in_2" and len(trafficLight_2['table'])!=0:
+			#Chose the last car to the trafficLight_2
+			last_vehicle=trafficLight_2['table'][-1]['ID']
 		else:
 			old_state=changeState(new_state)
 			time.sleep(TIME_CHANGE_WITHOUT_CARS)
-			new_state="semaforo_3_4"
+			new_state="trafficLight_3_4"
 
-	
-	elif maior=="cars_in_3" or maior=="cars_in_4":
+	#Case either the traffic light 3 or 4 have the most cars in it
+	elif mostCars=="cars_in_3" or mostCars=="cars_in_4":
 
-		new_state="semaforo_3_4"
+		new_state="trafficLight_3_4"
 
-		if maior=="cars_in_3" and len(semaforo_3['table'])!=0:
-			last_vehicle=semaforo_3['table'][-1]['ID'] #ultimo carro na zona do semaforo_3
-		elif maior=="cars_in_3"and len(semaforo_4['table'])!=0:
-			last_vehicle=semaforo_4['table'][-1]['ID'] #ultimo carro na zona do semaforo_4
+		if mostCars=="cars_in_3" and len(trafficLight_3['table'])!=0:
+			#Chose the last car to the trafficLight_3
+			last_vehicle=trafficLight_3['table'][-1]['ID']
+		elif mostCars=="cars_in_3"and len(trafficLight_4['table'])!=0:
+			#Chose the last car to the trafficLight_4
+			last_vehicle=trafficLight_4['table'][-1]['ID']
 
+	#Change the state accordingly to the traffic ligths that have more cars in it
 	old_state=changeState(new_state)
 	
+	print(trafficLight_1['state'],trafficLight_2['state'],trafficLight_3['state'],trafficLight_4['state'])
 
-	print(semaforo_1['state'],semaforo_2['state'],semaforo_3['state'],semaforo_4['state'],"\n")
+	timer_trafficLight(new_state,last_vehicle)
 
-	timer_semaforo(new_state,last_vehicle)
-
+#Function used to change the state of a pair of traffic lights
 def changeState(state):
 
-	print(state)
-
 	if state!=old_state:
-		if state=="semaforo_1_2":
+		if state=="trafficLight_1_2":
 
-			if RASPBERRY==True:
-				gpio.output(40,gpio.HIGH)
-				gpio.output(38,gpio.LOW)
-				gpio.output(36,gpio.LOW)
+			#gpio.output(40,gpio.HIGH)
+			#gpio.output(38,gpio.LOW)
+			#gpio.output(36,gpio.LOW)
 
-			semaforo_1['state']="green"
-			semaforo_2['state']="green"
-			semaforo_3['state']="red"
-			semaforo_4['state']="red"
+			trafficLight_1['state']="green"
+			trafficLight_2['state']="green"
+			trafficLight_3['state']="red"
+			trafficLight_4['state']="red"
 
-		elif state=="semaforo_3_4":
+		elif state=="trafficLight_3_4":
 
-			if RASPBERRY==True:
-				gpio.output(40,gpio.LOW)
-				gpio.output(38,gpio.HIGH)
-				gpio.output(36,gpio.LOW)
+			#gpio.output(40,gpio.LOW)
+			#gpio.output(38,gpio.HIGH)
+			#gpio.output(36,gpio.LOW)
 
-				time.sleep(TIME_YELLOW)
+			time.sleep(TIME_YELLOW)
 
-				gpio.output(40,gpio.LOW)
-				gpio.output(38,gpio.LOW)
-				gpio.output(36,gpio.HIGH)
+			#gpio.output(40,gpio.LOW)
+			#gpio.output(38,gpio.LOW)
+			#gpio.output(36,gpio.HIGH)
 
-			semaforo_1['state']="red"
-			semaforo_2['state']="red"
-			semaforo_3['state']="green"
-			semaforo_4['state']="green"
+			trafficLight_1['state']="red"
+			trafficLight_2['state']="red"
+			trafficLight_3['state']="green"
+			trafficLight_4['state']="green"
 
 	return state
 
-def timer_semaforo(state,last_vehicle):
-
-	global lock_app
+def timer_trafficLight(state,last_vehicle):
 
 	flag_last_car=True
 	if last_vehicle!="":
 		while flag_last_car==True:
 			flag_last_car= False
-			if state=="semaforo_1_2":
+			if state=="trafficLight_1_2":
 				lock_app.acquire()
 				try:
-					for i in semaforo_1['table']:
+					for i in trafficLight_1['table']:
 						if i['ID']==last_vehicle:
 							flag_last_car=True
 							break
 
-					for i in semaforo_2['table']:
+					for i in trafficLight_2['table']:
 						if i['ID']==last_vehicle:
 							flag_last_car=True
 							break
 				finally:
 					lock_app.release()
-			if state=="semaforo_3_4":
+			if state=="trafficLight_3_4":
 				lock_app.acquire()
 				try:
-					for i in semaforo_3['table']:
+					for i in trafficLight_3['table']:
 						if i['ID']==last_vehicle:
 							flag_last_car=True
 							break
 
-					for i in semaforo_4['table']:
+					for i in trafficLight_4['table']:
 						if i['ID']==last_vehicle:
 							flag_last_car=True
 							break
@@ -417,66 +398,33 @@ def timer_semaforo(state,last_vehicle):
 	else:
 		timecounter=ThreadTimeCounter("Thread-timeCounter")
 		timecounter.start()
-		time.sleep(TIME_CHANGE_WITHOUT_CARS+TIME_YELLOW)
+		time.sleep(TIME_CHANGE_WITHOUT_CARS + TIME_YELLOW)
 		flag_last_car==False
 
-	decide_cor()
-
-def timeCounter():
-	global counter
-	counter=TIME_CHANGE_WITHOUT_CARS+TIME_YELLOW
-	while counter>0:
-		counter-=1
-		if len(semaforo_1['table'])>0 and counter!=0:
-			coord=semaforo_1['table'][0]['Coordinates']
-			coord_x=coord[0]
-			final=8-coord_x
-			print("#######################################################################")
-			print("Velocidade recomendada: "+str(float(final)/float(counter))+" coord/s")
-			print("#######################################################################")
-		time.sleep(1)
-
-
-#-------------------------------------#
-#               Threads               #
-#-------------------------------------#
-
-
-class ThreadAlgoritmo (threading.Thread):
-   def __init__(self, threadID):
-      threading.Thread.__init__(self)
-      self.threadID = threadID
-   def run(self):
-      decide_cor()
-
-class myThread (threading.Thread):
-   def __init__(self, threadID):
-      threading.Thread.__init__(self)
-      self.threadID = threadID
-   def run(self):
-      threadClock()
-
-
-class ThreadReceiver (threading.Thread):
-   def __init__(self, threadID):
-      threading.Thread.__init__(self)
-      self.threadID = threadID
-   def run(self):
-      receiver()
-
-class ThreadSender (threading.Thread):
-   def __init__(self, threadID):
-      threading.Thread.__init__(self)
-      self.threadID = threadID
-   def run(self):
-      sender()
-
+	decideColor()
+##################################################################################################
+# Thread that is responsible for suggesting the recommended velocity of the first car in the ROI #
+##################################################################################################
 class ThreadTimeCounter (threading.Thread):
 	def __init__(self, threadID):
 		threading.Thread.__init__(self)
 		self.threadID = threadID
 	def run(self):
 		timeCounter()
+
+def timeCounter():
+	global counter
+	counter = TIME_CHANGE_WITHOUT_CARS + TIME_YELLOW
+	while counter>0:
+		counter-=1
+		if len(trafficLight_1['table'])>0 and counter!=0:
+			coord=trafficLight_1['table'][0]['Coordinates']
+			coord_x=coord[0]
+			final=8-coord_x
+			print("#######################################################################")
+			print("Velocidade recomendada: "+str(float(final)/float(counter))+" coord/s")
+			print("#######################################################################")
+		time.sleep(1)
 
 if __name__ == '__main__':
     main() 
